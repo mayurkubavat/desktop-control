@@ -52,6 +52,9 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[next_gen_vision_mcp_gemini_research|Next-Gen Vision Control MCP Architecture: Deep-Dive Research with Gemini 4 Argon]]
   * Multi-turn research dialogue with Gemini 4 Argon on Gemini Web exploring fundamental limits of reactive agents.
   * Comprehensive blueprints for Event-Driven Quiescence (XDamage/XFixes), Skill Crystallization (Journal AST), Semantic Modal Triage, Local Neural vDOM Sidecar, and 5-Phase Roadmap.
+* [[../learnings/vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
+  * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
+  * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).
 
 ---
 

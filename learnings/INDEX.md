@@ -46,6 +46,9 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
   * Saving and persisting `dv-view` to `~/.Xilinx/Vivado/2025.1/data/layouts/dv-view.layout`.
 
 ### 3. Agentic Performance & Token Optimization
+* [[vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
+  * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
+  * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).
 * [[zero_token_element_discovery|Zero-Token Element Discovery & Compound Actions]]
   * When to use `find_element` and `find_and_click` before taking full screenshots.
   * Using `click_and_type` to combine 4 actions into a single atomic step.

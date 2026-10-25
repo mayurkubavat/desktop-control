@@ -79,6 +79,28 @@ class VisionConfig(BaseModel):
         description="Containment threshold for nesting unmatched visual elements under parent containers.",
     )
 
+    # Fast-Path Neural ONNX UI Detector
+    enable_fast_onnx_detector: bool = Field(
+        default=True,
+        description="Whether to use sub-20ms ONNX UI detector for fast zero-token vDOM proposals.",
+    )
+    fast_onnx_model_path: str = Field(
+        default="vision_mcp/models/ui_detector_fast.onnx",
+        description="File path to the ONNX UI detection model.",
+    )
+    fast_onnx_conf_threshold: float = Field(
+        default=0.25,
+        description="Confidence threshold for neural UI proposals.",
+    )
+    fast_onnx_iou_threshold: float = Field(
+        default=0.45,
+        description="Non-Maximum Suppression IoU threshold for neural proposals.",
+    )
+    fast_onnx_num_threads: int = Field(
+        default=4,
+        description="Number of intra-op threads for ONNX Runtime CPU inference.",
+    )
+
     # Local Gemma 3 Multimodal Sidecar Plugin
     enable_gemma3_sidecar: bool = Field(
         default=True,

@@ -10,6 +10,15 @@ from vision_mcp.vdom.query import VDOMQueryEngine
 from vision_mcp.vdom.sidecar import LocalNeuralGrounder
 from vision_mcp.vdom.layout import SubPaneLayoutSolver
 from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder, SemanticROICache, compute_dhash
+from vision_mcp.vdom.fast_detector import (
+    FastONNXUIDetector,
+    UIClass,
+    build_default_ui_detector_model,
+    letterbox,
+    unletterbox_boxes,
+    nms_vectorized,
+    postprocess_yolo_detections,
+)
 
 __all__ = [
     "VDOMFusionEngine",
@@ -19,4 +28,11 @@ __all__ = [
     "Gemma3Grounder",
     "SemanticROICache",
     "compute_dhash",
+    "FastONNXUIDetector",
+    "UIClass",
+    "build_default_ui_detector_model",
+    "letterbox",
+    "unletterbox_boxes",
+    "nms_vectorized",
+    "postprocess_yolo_detections",
 ]

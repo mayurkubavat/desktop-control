@@ -16,6 +16,7 @@ import numpy as np
 from vision_mcp.config import CONFIG
 from vision_mcp.types import BoundingBox
 from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+from vision_mcp.vdom.fast_detector import FastONNXUIDetector
 
 logger = logging.getLogger(__name__)
 
@@ -23,30 +24,54 @@ logger = logging.getLogger(__name__)
 class LocalNeuralGrounder:
     """
     Local grounding sidecar interfacing with POSIX shared memory (/dev/shm)
-    and running low-latency neural/CV visual proposals and local Gemma 3 VLM grounding.
+    and running sub-20ms neural/CV visual proposals and local Gemma 3 VLM grounding.
     """
 
     def __init__(
         self,
         shm_path: str = CONFIG.vdom_sidecar_shm_path,
         onnx_model_path: Optional[str] = None,
+        enable_fast_onnx: bool = CONFIG.enable_fast_onnx_detector,
         enable_gemma3: bool = CONFIG.enable_gemma3_sidecar,
     ) -> None:
         self.shm_path = shm_path
-        self.onnx_model_path = onnx_model_path
+        self.onnx_model_path = onnx_model_path or CONFIG.fast_onnx_model_path
+        self.enable_fast_onnx = enable_fast_onnx
+        self.fast_detector: Optional[FastONNXUIDetector] = None
         self._onnx_session = None
         self.enable_gemma3 = enable_gemma3
         self.gemma3_grounder = Gemma3Grounder() if enable_gemma3 else None
 
-        if self.onnx_model_path and os.path.exists(self.onnx_model_path):
+        if self.enable_fast_onnx:
+            self._init_fast_detector()
+        elif self.onnx_model_path and os.path.exists(self.onnx_model_path):
             self._init_onnx()
+
+    def _init_fast_detector(self) -> None:
+        """Initializes high-speed ONNX UI detector."""
+        try:
+            self.fast_detector = FastONNXUIDetector(
+                model_path=self.onnx_model_path,
+                conf_thresh=CONFIG.fast_onnx_conf_threshold,
+                iou_thresh=CONFIG.fast_onnx_iou_threshold,
+                num_threads=CONFIG.fast_onnx_num_threads,
+            )
+            if self.fast_detector.is_available():
+                self._onnx_session = self.fast_detector._session
+                logger.info("Initialized Fast ONNX UI detector in LocalNeuralGrounder")
+            else:
+                self.fast_detector = None
+        except Exception as e:
+            logger.warning(f"Could not initialize Fast ONNX detector in LocalNeuralGrounder: {e}")
+            self.fast_detector = None
 
     def _init_onnx(self) -> None:
         try:
             import onnxruntime as ort
             sess_opts = ort.SessionOptions()
             sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            available = ort.get_available_providers()
+            providers = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in available] or ["CPUExecutionProvider"]
             self._onnx_session = ort.InferenceSession(
                 self.onnx_model_path,
                 sess_options=sess_opts,
@@ -79,11 +104,19 @@ class LocalNeuralGrounder:
         offset: Tuple[int, int] = (0, 0),
     ) -> List[Dict[str, Any]]:
         """
-        Generates fast UI element bounding box proposals (< 35ms) from the given image frame.
-        Uses neural inference if available, with graceful fallback to vectorized OpenCV contouring.
+        Generates fast UI element bounding box proposals (< 20ms) from the given image frame.
+        Uses neural inference via FastONNXUIDetector if available, with graceful fallback to OpenCV contouring.
         """
-        # If ONNX session is active
-        if self._onnx_session:
+        if self.fast_detector and self.fast_detector.is_available():
+            try:
+                proposals = self.fast_detector.detect(image, offset=offset)
+                if proposals:
+                    return proposals
+            except Exception as e:
+                logger.warning(f"Error during Fast ONNX proposal generation: {e}")
+
+        # Backward compatibility if raw onnx session was manually set
+        if self._onnx_session and not self.fast_detector:
             return self._run_onnx_inference(image, offset)
 
         # High-speed CV proposal generator (fallback)
@@ -114,7 +147,10 @@ class LocalNeuralGrounder:
 
     def _run_onnx_inference(self, image: Image.Image, offset: Tuple[int, int]) -> List[Dict[str, Any]]:
         """Runs batched ONNX tensor inference on the frame."""
-        # Stub for local ONNX inference
+        if self.fast_detector and self.fast_detector.is_available():
+            proposals = self.fast_detector.detect(image, offset=offset)
+            if proposals:
+                return proposals
         return self._generate_cv_proposals(image, offset)
 
     def _generate_cv_proposals(

@@ -180,7 +180,12 @@ class VDOMFusionEngine:
 
         # Check existing UIRole values
         try:
-            return UIRole(raw_class.lower())
+            raw_lower = raw_class.lower()
+            if raw_lower == "checkbox":
+                return UIRole.CHECK_BOX
+            if raw_lower in {"container_viewport", "container"}:
+                return UIRole.PANEL
+            return UIRole(raw_lower)
         except ValueError:
             pass
 

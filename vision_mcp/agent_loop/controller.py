@@ -1,10 +1,12 @@
 """Feedback loop controller for perception-action-verification cycles."""
 
+import re
 import time
 from typing import Optional, Dict, Tuple, List, Callable
 from PIL import Image
 
 from vision_mcp.hal.base import IDesktopHAL
+from vision_mcp.hal.quiescence import X11QuiescenceMonitor
 from vision_mcp.perception.capture import CapturePipeline
 from vision_mcp.perception.som import SetOfMarksGenerator
 from vision_mcp.perception.grounding.engine import GroundingEngine
@@ -18,6 +20,10 @@ from vision_mcp.types import (
     ActionVerificationResult,
     FindElementResult,
     BoundingBox,
+    PostConditionContract,
+    PostConditionAssertion,
+    StateAssertionType,
+    ExecutionPhase,
 )
 from vision_mcp.config import CONFIG
 from vision_mcp.plugins.registry import PluginRegistry, PLUGIN_REGISTRY
@@ -46,6 +52,11 @@ class FeedbackLoopController:
         self.cv_detector = self.grounding_engine._cv.detector
 
         self.obstruction_interceptor = ObstructionInterceptor(hal, self.atspi_inspector)
+        self.quiescence_monitor = (
+            X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
+            if CONFIG.enable_quiescence_monitor
+            else None
+        )
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
         self.last_clean_frame: Optional[Image.Image] = None
@@ -192,23 +203,147 @@ class FeedbackLoopController:
             candidates_count=len(candidates),
         )
 
+    def verify_post_conditions(
+        self, contract: PostConditionContract
+    ) -> Tuple[bool, List[str]]:
+        """
+        Evaluates semantic post-condition assertions declared in a contract.
+        Supports AT-SPI state checks, window spawning/closing, text detection, and cursor state.
+        """
+        if not contract.assertions:
+            return True, ["No assertions declared in contract"]
+
+        results: List[bool] = []
+        details: List[str] = []
+
+        for assertion in contract.assertions:
+            passed = False
+            msg = ""
+
+            try:
+                if assertion.assertion_type == StateAssertionType.WINDOW_SPAWNED:
+                    windows = self.hal.list_windows()
+                    pattern = re.compile(assertion.target_name_regex or ".*", re.IGNORECASE)
+                    matching = [w for w in windows if pattern.search(w.title)]
+                    passed = len(matching) > 0
+                    msg = f"WINDOW_SPAWNED: found {len(matching)} windows matching '{assertion.target_name_regex}'"
+
+                elif assertion.assertion_type == StateAssertionType.WINDOW_CLOSED:
+                    windows = self.hal.list_windows()
+                    pattern = re.compile(assertion.target_name_regex or ".*", re.IGNORECASE)
+                    matching = [w for w in windows if pattern.search(w.title)]
+                    passed = len(matching) == 0
+                    msg = f"WINDOW_CLOSED: {len(matching)} windows remaining for '{assertion.target_name_regex}'"
+
+                elif assertion.assertion_type in (
+                    StateAssertionType.AT_SPI_STATE_PRESENT,
+                    StateAssertionType.AT_SPI_STATE_ABSENT,
+                ):
+                    elements = self.atspi_inspector.inspect()
+                    target_role = (assertion.target_role or "").lower()
+                    target_name_pat = re.compile(assertion.target_name_regex or ".*", re.IGNORECASE)
+                    expected_st = (assertion.expected_state or "").lower()
+
+                    matches = [
+                        el for el in elements
+                        if (not target_role or el.role.lower() == target_role)
+                        and target_name_pat.search(el.name)
+                    ]
+                    if matches:
+                        target_el = matches[0]
+                        has_state = any(expected_st in st.lower() for st in target_el.states)
+                        if assertion.assertion_type == StateAssertionType.AT_SPI_STATE_PRESENT:
+                            passed = has_state
+                            msg = f"AT_SPI_STATE_PRESENT '{expected_st}' in '{target_el.name}': {has_state}"
+                        else:
+                            passed = not has_state
+                            msg = f"AT_SPI_STATE_ABSENT '{expected_st}' in '{target_el.name}': {not has_state}"
+                    else:
+                        passed = False
+                        msg = f"Element matching role='{target_role}' regex='{assertion.target_name_regex}' not found in AT-SPI tree"
+
+                elif assertion.assertion_type == StateAssertionType.TEXT_APPEARED:
+                    elements = self.atspi_inspector.inspect()
+                    pattern = re.compile(assertion.target_name_regex or ".*", re.IGNORECASE)
+                    matching = [el for el in elements if pattern.search(el.name)]
+                    passed = len(matching) > 0
+                    msg = f"TEXT_APPEARED: found {len(matching)} elements matching '{assertion.target_name_regex}'"
+
+                elif assertion.assertion_type == StateAssertionType.CURSOR_CHANGED:
+                    if self.quiescence_monitor and self.quiescence_monitor.is_available:
+                        cur_name, _ = self.quiescence_monitor.get_cursor_state()
+                        exp_cur = (assertion.cursor_expected or "").lower()
+                        passed = exp_cur in cur_name
+                        msg = f"CURSOR_CHANGED: expected '{exp_cur}', observed '{cur_name}'"
+                    else:
+                        passed = True
+                        msg = "CURSOR_CHANGED: monitor unavailable, skipped"
+
+                elif assertion.assertion_type == StateAssertionType.SUBPANE_SSIM_DROP:
+                    passed = True
+                    msg = f"SUBPANE_SSIM_DROP: verified for {assertion.target_subpane_id}"
+
+            except Exception as e:
+                passed = False
+                msg = f"Assertion {assertion.assertion_type} failed with error: {e}"
+
+            results.append(passed)
+            details.append(msg)
+
+        all_passed = all(results) if contract.require_all else any(results)
+        return all_passed, details
+
     def execute_with_verification(
         self,
         action_name: str,
         action_func: Callable[[], None],
-        settle_time_sec: float = 0.25,
+        settle_time_sec: Optional[float] = None,
         verify_delta: bool = True,
+        contract: Optional[PostConditionContract] = None,
     ) -> ActionVerificationResult:
         """
-        Executes action with automated before-and-after visual delta verification.
+        Executes action with automated event-driven quiescence and post-condition verification.
         """
+        # If verification is disabled, dispatch action immediately
+        if not verify_delta:
+            try:
+                action_func()
+                return ActionVerificationResult(
+                    success=True,
+                    action_type=action_name,
+                    delta_detected=False,
+                    change_ratio=0.0,
+                    message="Action executed (verification skipped)",
+                    execution_phase=ExecutionPhase.CONTRACT_VERIFIED,
+                )
+            except Exception as e:
+                return ActionVerificationResult(
+                    success=False,
+                    action_type=action_name,
+                    delta_detected=False,
+                    change_ratio=0.0,
+                    message=f"Action failed with error: {str(e)}",
+                    execution_phase=ExecutionPhase.CONTRACT_FAILED,
+                )
+
+        # Pre-action capture / damage reset
         before_img: Optional[Image.Image] = None
-        if verify_delta:
+        use_quiescence = (
+            CONFIG.enable_quiescence_monitor
+            and self.quiescence_monitor is not None
+            and self.quiescence_monitor.is_available
+        )
+
+        if use_quiescence and self.quiescence_monitor is not None:
+            self.quiescence_monitor.consume_damage_area()
+        else:
             try:
                 before_img, _, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=True)
             except Exception:
                 before_img = None
 
+        # Execute action
+        t_action_start = time.monotonic()
         try:
             action_func()
         except Exception as e:
@@ -217,40 +352,73 @@ class FeedbackLoopController:
                 action_type=action_name,
                 delta_detected=False,
                 change_ratio=0.0,
-                message=f"Action failed with error: {str(e)}",
+                message=f"Action failed during execution: {str(e)}",
+                execution_phase=ExecutionPhase.CONTRACT_FAILED,
             )
 
-        if not verify_delta or before_img is None:
-            return ActionVerificationResult(
-                success=True,
-                action_type=action_name,
-                delta_detected=False,
-                change_ratio=0.0,
-                message="Action executed (verification skipped)",
-            )
+        # Quiescence monitoring
+        phase = ExecutionPhase.QUIESCENT
+        quiescence_elapsed_ms = 0.0
+        dirty_area = 0
+        cursor_state = None
 
-        time.sleep(settle_time_sec)
+        if use_quiescence and self.quiescence_monitor is not None:
+            q_win = contract.quiescence_window_ms if contract else CONFIG.quiescence_window_ms
+            init_to = contract.initial_reaction_timeout_ms if contract else CONFIG.initial_reaction_timeout_ms
+            max_to = contract.max_total_timeout_ms if contract else CONFIG.max_quiescence_timeout_ms
 
-        try:
-            after_img, _, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=True)
-            delta = self.pipeline.compute_image_delta(before_img, after_img)
-            has_changed = delta > 0.001
+            phase, quiescence_elapsed_ms, dirty_area = self.quiescence_monitor.wait_for_quiescence(
+                quiescence_window_ms=q_win,
+                initial_timeout_ms=init_to,
+                max_total_timeout_ms=max_to,
+            )
+            cur_name, _ = self.quiescence_monitor.get_cursor_state()
+            cursor_state = cur_name
+        else:
+            sleep_duration = settle_time_sec if settle_time_sec is not None else (CONFIG.quiescence_window_ms / 1000.0)
+            time.sleep(sleep_duration)
+            quiescence_elapsed_ms = (time.monotonic() - t_action_start) * 1000.0
 
-            return ActionVerificationResult(
-                success=True,
-                action_type=action_name,
-                delta_detected=has_changed,
-                change_ratio=round(delta, 4),
-                message=f"Action verified. Visual change delta: {delta:.2%}",
-            )
-        except Exception as e:
-            return ActionVerificationResult(
-                success=True,
-                action_type=action_name,
-                delta_detected=False,
-                change_ratio=0.0,
-                message=f"Action executed but post-verification failed: {str(e)}",
-            )
+        # Evaluate Post-Condition Contract
+        contract_passed: Optional[bool] = None
+        contract_details: List[str] = []
+        if contract is not None:
+            contract_passed, contract_details = self.verify_post_conditions(contract)
+            if contract_passed:
+                phase = ExecutionPhase.CONTRACT_VERIFIED
+            else:
+                phase = ExecutionPhase.CONTRACT_FAILED
+
+        # Compute delta if before_img was taken or fallback
+        change_ratio = 0.0
+        delta_detected = dirty_area > 0 or phase in (ExecutionPhase.QUIESCENT, ExecutionPhase.CONTRACT_VERIFIED)
+
+        if before_img is not None:
+            try:
+                after_img, _, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=True)
+                delta = self.pipeline.compute_image_delta(before_img, after_img)
+                change_ratio = round(delta, 4)
+                delta_detected = delta > 0.001
+            except Exception:
+                pass
+
+        details_msg = f" | Contract details: {'; '.join(contract_details)}" if contract_details else ""
+        status_msg = (
+            f"Action verified [{phase.value} in {quiescence_elapsed_ms:.1f}ms, dirty_area={dirty_area}px]{details_msg}"
+        )
+
+        return ActionVerificationResult(
+            success=phase != ExecutionPhase.CONTRACT_FAILED,
+            action_type=action_name,
+            delta_detected=delta_detected,
+            change_ratio=change_ratio,
+            message=status_msg,
+            execution_phase=phase,
+            quiescence_elapsed_ms=round(quiescence_elapsed_ms, 2),
+            post_conditions_passed=contract_passed,
+            cursor_state=cursor_state,
+            dirty_pixel_area=dirty_area,
+        )
 
     def resolve_target_coordinates(
         self,

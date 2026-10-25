@@ -29,6 +29,28 @@ class VisionConfig(BaseModel):
         description="Whether to automatically crop screenshots to the currently active window bounds.",
     )
 
+    # Event-Driven Quiescence & Verification
+    enable_quiescence_monitor: bool = Field(
+        default=True,
+        description="Whether to use XDamage & XFixes sub-millisecond quiescence monitoring instead of static sleep.",
+    )
+    quiescence_window_ms: int = Field(
+        default=180,
+        description="Continuous quiet period (ms) required before declaring UI settled.",
+    )
+    initial_reaction_timeout_ms: int = Field(
+        default=1500,
+        description="Maximum milliseconds to wait for initial screen damage or cursor busy signal post-action.",
+    )
+    max_quiescence_timeout_ms: int = Field(
+        default=15000,
+        description="Maximum total milliseconds to wait for UI settling before timeout or async job promotion.",
+    )
+    min_damage_area: int = Field(
+        default=64,
+        description="Pixel area threshold to filter out tiny caret blinks during damage accumulation.",
+    )
+
     # Self-Healing Action Cache
     enable_action_cache: bool = Field(
         default=True,

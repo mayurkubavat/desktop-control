@@ -1,7 +1,52 @@
 """Data types and schemas for Vision Control MCP."""
 
+from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
+
+
+class ExecutionPhase(str, Enum):
+    """Lifecycle phases of the adaptive event-driven quiescence loop."""
+    DISPATCHED = "DISPATCHED"
+    DAMAGE_ACCUMULATION = "DAMAGE_ACCUMULATION"
+    SETTLING = "SETTLING"
+    QUIESCENT = "QUIESCENT"
+    ASYNC_PROMOTED = "ASYNC_PROMOTED"
+    CONTRACT_VERIFIED = "CONTRACT_VERIFIED"
+    OBSTRUCTED_BY_MODAL = "OBSTRUCTED_BY_MODAL"
+    CONTRACT_FAILED = "CONTRACT_FAILED"
+
+
+class StateAssertionType(str, Enum):
+    """Semantic post-condition assertion types."""
+    AT_SPI_STATE_PRESENT = "at_spi_state_present"
+    AT_SPI_STATE_ABSENT = "at_spi_state_absent"
+    WINDOW_SPAWNED = "window_spawned"
+    WINDOW_CLOSED = "window_closed"
+    TEXT_APPEARED = "text_appeared"
+    SUBPANE_SSIM_DROP = "subpane_ssim_drop"
+    CURSOR_CHANGED = "cursor_changed"
+
+
+class PostConditionAssertion(BaseModel):
+    """Single semantic post-condition assertion evaluated upon UI quiescence."""
+    assertion_type: StateAssertionType = Field(description="Target assertion mechanism")
+    target_role: Optional[str] = Field(default=None, description="UI role to inspect (push_button, dialog, etc.)")
+    target_name_regex: Optional[str] = Field(default=None, description="Regex pattern matching element name or window title")
+    target_subpane_id: Optional[str] = Field(default=None, description="Optional sub-pane identifier for localized verification")
+    expected_state: Optional[str] = Field(default=None, description="Expected accessible state (e.g., FOCUSED, CHECKED)")
+    min_ssim_delta: float = Field(default=0.08, ge=0.0, le=1.0, description="Minimum structural change required")
+    cursor_expected: Optional[str] = Field(default=None, description="Expected cursor shape name (e.g., arrow, text)")
+
+
+class PostConditionContract(BaseModel):
+    """Contract declaring expected post-conditions following a GUI action."""
+    assertions: List[PostConditionAssertion] = Field(default_factory=list, description="List of expected post-conditions")
+    require_all: bool = Field(default=True, description="True for AND evaluation across assertions; False for OR")
+    initial_reaction_timeout_ms: int = Field(default=1500, description="Max milliseconds to wait for initial reaction/damage")
+    quiescence_window_ms: int = Field(default=180, description="Required milliseconds of continuous quiet state")
+    max_total_timeout_ms: int = Field(default=15000, description="Maximum ceiling before escalating or timing out")
+    allow_async_promotion: bool = Field(default=True, description="Whether to promote long-running actions to async jobs")
 
 
 class BoundingBox(BaseModel):
@@ -61,6 +106,26 @@ class ActionVerificationResult(BaseModel):
     delta_detected: bool = Field(default=False, description="Whether a visual screen change was observed post-action")
     change_ratio: float = Field(default=0.0, description="Fraction of pixels altered in region of interest")
     message: str = Field(default="", description="Status or error message")
+    execution_phase: ExecutionPhase = Field(
+        default=ExecutionPhase.CONTRACT_VERIFIED,
+        description="Quiescence lifecycle phase reached (QUIESCENT, CONTRACT_VERIFIED, CONTRACT_FAILED, etc.)",
+    )
+    quiescence_elapsed_ms: float = Field(
+        default=0.0,
+        description="Time in milliseconds elapsed from action injection to UI quiescence",
+    )
+    post_conditions_passed: Optional[bool] = Field(
+        default=None,
+        description="Whether explicit post-condition contract assertions succeeded (None if no contract provided)",
+    )
+    cursor_state: Optional[str] = Field(
+        default=None,
+        description="Observed mouse cursor shape name post-action (e.g. 'arrow', 'text', 'watch')",
+    )
+    dirty_pixel_area: int = Field(
+        default=0,
+        description="Total cumulative dirty pixel area observed during damage accumulation",
+    )
 
 
 class FindElementResult(BaseModel):

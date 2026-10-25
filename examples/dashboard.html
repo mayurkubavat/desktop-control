@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vision MCP Multi-App Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            margin: 0;
+            padding: 30px;
+        }
+        .card {
+            background: #28283d;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            max-width: 600px;
+            margin: 0 auto;
+            border: 1px solid #45475a;
+        }
+        h1 {
+            color: #89b4fa;
+            font-size: 24px;
+            margin-top: 0;
+            border-bottom: 1px solid #45475a;
+            padding-bottom: 12px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #a6adc8;
+        }
+        input[type="text"] {
+            width: 90%;
+            padding: 10px 14px;
+            background: #181825;
+            border: 1px solid #585b70;
+            border-radius: 6px;
+            color: #cdd6f4;
+            font-size: 15px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #89b4fa;
+            color: #11111b;
+        }
+        .btn-success {
+            background: #a6e3a1;
+            color: #11111b;
+        }
+        .btn-danger {
+            background: #f38ba8;
+            color: #11111b;
+        }
+        .status-box {
+            margin-top: 24px;
+            padding: 16px;
+            border-radius: 8px;
+            background: #181825;
+            border-left: 4px solid #f9e2af;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .status-active {
+            border-left-color: #a6e3a1;
+            color: #a6e3a1;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Vision MCP Control Console</h1>
+        <div class="form-group">
+            <label for="cluster-input">Cluster Name / Endpoint:</label>
+            <input type="text" id="cluster-input" placeholder="e.g. prod-vision-cluster-01" value="staging-cluster-alpha">
+        </div>
+        <div class="btn-group">
+            <button id="btn-deploy" class="btn-primary" onclick="deployService()">Deploy Service</button>
+            <button id="btn-verify" class="btn-success" onclick="verifyHealth()">Verify Health</button>
+            <button id="btn-reset" class="btn-danger" onclick="resetState()">Reset</button>
+        </div>
+        <div id="status-panel" class="status-box">
+            Status: IDLE (Waiting for deployment trigger)
+        </div>
+    </div>
+
+    <script>
+        function deployService() {
+            const cluster = document.getElementById('cluster-input').value;
+            const panel = document.getElementById('status-panel');
+            panel.className = 'status-box status-active';
+            panel.innerText = `Status: DEPLOYED to [${cluster}] - PID: 4291 (Port 9090 LIVE)`;
+        }
+        function verifyHealth() {
+            const panel = document.getElementById('status-panel');
+            panel.className = 'status-box status-active';
+            panel.innerText = 'Status: HEALTH CHECK PASSED (Latency: 1.2ms, HTTP 200 OK)';
+        }
+        function resetState() {
+            const panel = document.getElementById('status-panel');
+            panel.className = 'status-box';
+            panel.innerText = 'Status: IDLE (Waiting for deployment trigger)';
+        }
+    </script>
+</body>
+</html>

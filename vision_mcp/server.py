@@ -140,8 +140,10 @@ def manage_cache(
     Manages the Self-Healing Action & Locator Cache.
 
     Args:
-        action: 'stats' (view telemetry), 'invalidate' (clear specific entry), or 'clear' (empty cache).
-        app_key: Application identifier (used for invalidate).
+        action: 'stats' (view telemetry), 'verify' (proactive health check against live screen),
+                'heal' (proactively re-anchor drifting entries), 'invalidate' (clear specific entry),
+                or 'clear' (empty cache).
+        app_key: Application identifier (used for invalidate, verify, heal).
         query: Query string (used for invalidate).
     """
     act = action.strip().lower()
@@ -155,6 +157,14 @@ def manage_cache(
             return {"success": False, "error": "Must provide 'app_key' and 'query' to invalidate."}
         ok = controller.action_cache.invalidate(app_key=app_key, query=query)
         return {"success": ok, "message": f"Entry for '{app_key}::{query}' invalidated."}
+    elif act in ("verify", "heal"):
+        target_app = app_key or controller._get_active_app_key()
+        try:
+            screen = hal.capture_screen()
+            win = hal.get_active_window()
+            return controller.action_cache.proactive_verify_all(app_key=target_app, live_screen=screen, current_window=win)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to execute proactive {act}: {e}"}
     return {"success": False, "error": f"Unknown action: '{action}'"}
 
 

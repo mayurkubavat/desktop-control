@@ -488,19 +488,45 @@ class FeedbackLoopController:
         if query:
             app_key = self._get_active_app_key()
             if use_cache and CONFIG.enable_action_cache:
-                cached = self.action_cache.get(app_key, query)
-                if cached:
+                current_win = self.hal.get_active_window()
+                screen = None
+                if CONFIG.action_cache_verify_visual:
+                    try:
+                        screen = self.hal.capture_screen()
+                    except Exception:
+                        screen = None
+
+                status, cached = self.action_cache.resolve_locator(
+                    app_key=app_key,
+                    query=query,
+                    live_screen=screen,
+                    current_window=current_win,
+                    search_radius=CONFIG.action_cache_search_radius_px,
+                    min_match_score=CONFIG.action_cache_match_threshold,
+                    dhash_threshold=CONFIG.action_cache_dhash_threshold,
+                )
+                if status in ("VERIFIED", "WINDOW_REPROJECTED", "HEALED", "CACHED") and cached:
                     return cached.center_coords
 
             res = self.find_element(query=query)
             if res.found and res.center_coords and res.element:
                 if CONFIG.enable_action_cache:
+                    current_win = self.hal.get_active_window()
+                    crop = None
+                    try:
+                        fresh_screen = self.hal.capture_screen()
+                        eb = res.element.bbox
+                        crop = fresh_screen.crop((eb.x, eb.y, eb.right, eb.bottom))
+                    except Exception:
+                        pass
                     self.action_cache.record(
                         app_key=app_key,
                         query=query,
                         bbox=res.element.bbox,
                         center_coords=res.center_coords,
                         role=res.element.role,
+                        window_info=current_win,
+                        visual_crop=crop,
                     )
                 return res.center_coords
             raise ValueError(f"Could not find element matching query '{query}'.")
@@ -531,17 +557,37 @@ class FeedbackLoopController:
         Autonomous one-shot action with Self-Healing Action Cache & Obstruction Defense.
         """
         app_key = self._get_active_app_key()
-        cached = self.action_cache.get(app_key, query) if CONFIG.enable_action_cache else None
+        current_win = self.hal.get_active_window()
+        screen = None
+        if CONFIG.enable_action_cache and CONFIG.action_cache_verify_visual:
+            try:
+                screen = self.hal.capture_screen()
+            except Exception:
+                screen = None
+
+        cached = None
+        status = "MISS"
+        if CONFIG.enable_action_cache:
+            status, cached = self.action_cache.resolve_locator(
+                app_key=app_key,
+                query=query,
+                live_screen=screen,
+                current_window=current_win,
+                search_radius=CONFIG.action_cache_search_radius_px,
+                min_match_score=CONFIG.action_cache_match_threshold,
+                dhash_threshold=CONFIG.action_cache_dhash_threshold,
+            )
 
         # 1. Attempt cached locator playback
-        if cached:
+        if cached and status in ("VERIFIED", "WINDOW_REPROJECTED", "HEALED", "CACHED"):
             target_x, target_y = cached.center_coords
 
             def _do_cached():
                 self.hal.mouse_click(target_x, target_y, button=button, click_count=click_count)
 
+            tag = f"find_and_click[{status.lower()}]('{query}', {button}) at ({target_x}, {target_y})"
             res = self.execute_with_verification(
-                action_name=f"find_and_click[cached]('{query}', {button}) at ({target_x}, {target_y})",
+                action_name=tag,
                 action_func=_do_cached,
                 verify_delta=verify_delta,
             )
@@ -579,14 +625,24 @@ class FeedbackLoopController:
             verify_delta=verify_delta,
         )
 
-        # 4. Save newly verified coordinates into cache
+        # 4. Save newly verified coordinates into cache with visual crop and window info
         if res.success and (not verify_delta or res.delta_detected) and CONFIG.enable_action_cache:
+            crop = None
+            try:
+                fresh_screen = self.hal.capture_screen()
+                eb = elem_res.element.bbox
+                crop = fresh_screen.crop((eb.x, eb.y, eb.right, eb.bottom))
+            except Exception:
+                pass
+
             self.action_cache.record(
                 app_key=app_key,
                 query=query,
                 bbox=elem_res.element.bbox,
                 center_coords=(target_x, target_y),
                 role=elem_res.element.role,
+                window_info=current_win,
+                visual_crop=crop,
             )
 
         return res
@@ -650,12 +706,21 @@ class FeedbackLoopController:
                     verify_delta=verify_delta,
                 )
                 if res.delta_detected:
+                    crop = None
+                    try:
+                        fresh_screen = self.hal.capture_screen()
+                        eb = elem_res.element.bbox
+                        crop = fresh_screen.crop((eb.x, eb.y, eb.right, eb.bottom))
+                    except Exception:
+                        pass
                     self.action_cache.record(
                         app_key=app_key,
                         query=query,
                         bbox=elem_res.element.bbox,
                         center_coords=(target_x, target_y),
                         role=elem_res.element.role,
+                        window_info=self.hal.get_active_window(),
+                        visual_crop=crop,
                     )
 
         return res

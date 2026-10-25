@@ -142,6 +142,26 @@ class VisionConfig(BaseModel):
         default=True,
         description="Whether to use the self-healing locator cache for zero-token repeat actions.",
     )
+    action_cache_verify_visual: bool = Field(
+        default=True,
+        description="Whether to perform pre-flight dHash and template visual verification before clicking cached coordinates.",
+    )
+    action_cache_dhash_threshold: int = Field(
+        default=6,
+        description="Maximum perceptual Hamming distance for pre-flight visual verification hit.",
+    )
+    action_cache_search_radius_px: int = Field(
+        default=60,
+        description="Pixel search radius around cached coordinates for auto-reanchoring drift recovery.",
+    )
+    action_cache_match_threshold: float = Field(
+        default=0.78,
+        description="Minimum normalized cross-correlation score for neighborhood template auto-reanchoring.",
+    )
+    action_cache_window_relative: bool = Field(
+        default=True,
+        description="Whether to dynamically compensate for window movements and resizing.",
+    )
 
     # Autonomous Obstruction Interception
     auto_dismiss_obstructions: bool = Field(

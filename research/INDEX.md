@@ -35,6 +35,8 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[token_optimization_and_cost_dynamics|Token Optimization & Cost Dynamics]]
   * Overcoming the context-window explosion in long-horizon desktop tasks.
   * Sliding visual windows, delta-patching, semantic pruning, and locator caching.
+* [[future_enhancements_roadmap|Next-Generation Enhancement Roadmap]]
+  * Six architectural frontiers: Action Caching, Obstruction Interception, Macro Trajectories, Per-Window Perception, State Rollback, and Embedded OCR.
 
 ---
 

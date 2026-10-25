@@ -8,9 +8,10 @@ Built with a **continuous perception-action-verification feedback loop**, the se
 
 ## 1. Key Architectural Features
 
-* **Dual Grounding Strategy (Semantic + Visual):**
+* **Triple Grounding Strategy (Semantic + Pure Computer Vision + Set-of-Marks):**
   * **Semantic Grounding (AT-SPI2 / D-Bus):** Directly inspects the Linux accessibility bus (`org.a11y.Bus`) to retrieve exact button names, text fields, menu hierarchies, roles, and physical bounding boxes without relying purely on pixel guessing.
-  * **Visual Grounding (Set-of-Marks / SoM):** Overlays high-contrast, numbered badges onto interactive UI elements. The LLM simply outputs `click(mark_id=4)` instead of predicting floating-point coordinates.
+  * **Pure Computer Vision Grounding Fallback (`CVDetector`):** When interacting with applications that lack AT-SPI trees (canvas-based web apps, games, legacy X11 utilities), an OpenCV-powered edge/contour and MSER text-region detector automatically discovers interactive bounding boxes directly from screenshot pixels.
+  * **Visual Prompting (Set-of-Marks / SoM):** Overlays high-contrast, numbered badges onto interactive UI elements. The LLM simply outputs `click(mark_id=4)` instead of predicting floating-point coordinates.
 * **Closed-Loop Feedback & Delta Verification:**
   * Every physical action (click, type, hotkey, scroll) automatically captures pre- and post-action observation frames.
   * Measures visual pixel deltas to verify whether the screen reacted (e.g., verifying a dropdown opened or text was entered) before proceeding to the next step.

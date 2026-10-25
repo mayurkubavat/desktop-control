@@ -36,7 +36,8 @@ def take_screenshot(
 
     Args:
         mode: Grounding mode:
-              - 'annotated_som': Overlays Set-of-Marks numbered badges on interactable elements.
+              - 'annotated_som': Overlays Set-of-Marks badges using AT-SPI2 with automatic Computer Vision fallback.
+              - 'annotated_cv': Forces pure Computer Vision edge/contour and text region detection.
               - 'cursor_only': Screenshot showing current mouse pointer position.
               - 'raw': Clean desktop screenshot without annotations.
         app_filter: Optional application title or process filter for AT-SPI introspection.

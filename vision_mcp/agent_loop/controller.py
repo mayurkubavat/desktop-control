@@ -8,6 +8,7 @@ from vision_mcp.hal.base import IDesktopHAL
 from vision_mcp.perception.capture import CapturePipeline
 from vision_mcp.perception.som import SetOfMarksGenerator
 from vision_mcp.perception.atspi import ATSPIInspector
+from vision_mcp.perception.cv_detector import CVDetector
 from vision_mcp.types import (
     ScreenshotResult,
     UIElement,
@@ -28,6 +29,7 @@ class FeedbackLoopController:
         self.pipeline = CapturePipeline(hal)
         self.som_generator = SetOfMarksGenerator()
         self.atspi_inspector = ATSPIInspector()
+        self.cv_detector = CVDetector()
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
 
@@ -42,7 +44,9 @@ class FeedbackLoopController:
         Captures current desktop state with optional Set-of-Marks annotations.
 
         Args:
-            mode: 'annotated_som' (overlay marked badges), 'raw' (unmodified screenshot),
+            mode: 'annotated_som' (hybrid AT-SPI with CV fallback),
+                  'annotated_cv' (force pure computer vision detection),
+                  'raw' (unmodified screenshot),
                   or 'cursor_only' (screenshot with virtual pointer).
             app_filter: Filter for AT-SPI application inspection.
             region: Optional (x, y, w, h) sub-region.
@@ -51,7 +55,7 @@ class FeedbackLoopController:
         Returns:
             ScreenshotResult model containing base64 payload and marked element registry.
         """
-        draw_cursor = mode in ("annotated_som", "cursor_only")
+        draw_cursor = mode in ("annotated_som", "annotated_cv", "cursor_only")
         img, scale_factor, (orig_w, orig_h), cursor_pos = self.pipeline.capture(
             region=region,
             draw_cursor=draw_cursor,
@@ -60,9 +64,17 @@ class FeedbackLoopController:
 
         marks_list: List[UIElement] = []
 
-        if mode == "annotated_som":
-            # Extract elements from AT-SPI
-            raw_elements = self.atspi_inspector.inspect_desktop(app_name_filter=app_filter)
+        if mode in ("annotated_som", "annotated_cv"):
+            raw_elements: List[UIElement] = []
+
+            # Try AT-SPI first if not forcing pure CV
+            if mode != "annotated_cv":
+                raw_elements = self.atspi_inspector.inspect_desktop(app_name_filter=app_filter)
+
+            # Fallback to Computer Vision edge & contour detection if AT-SPI returns no elements
+            if not raw_elements:
+                raw_elements = self.cv_detector.detect(img, scale_factor=scale_factor)
+
             if raw_elements:
                 img, self.active_marks = self.som_generator.annotate(
                     image=img,

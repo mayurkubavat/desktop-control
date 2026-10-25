@@ -175,9 +175,10 @@ class ATSPIInspector:
                     x = win_offset[0] + w_rect.x
                     y = win_offset[1] + w_rect.y
 
-                # Check validity of geometry
+                # Check validity of geometry (skip collapsed dropdown items)
                 area = w * h
-                if w > 4 and h > 4 and area >= CONFIG.som_min_element_area:
+                is_collapsed_menu = (role.lower() == "menu item" and h <= 14)
+                if w > 8 and h > 8 and area >= CONFIG.som_min_element_area and not is_collapsed_menu:
                     # Filter condition
                     if not filter_interactable or is_interactable:
                         element = UIElement(

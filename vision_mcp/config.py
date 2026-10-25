@@ -27,7 +27,7 @@ class VisionConfig(BaseModel):
         description="Font size for SoM numeric badge overlays.",
     )
     som_max_elements: int = Field(
-        default=60,
+        default=150,
         description="Max number of interactable elements to tag with SoM badges.",
     )
     som_min_element_area: int = Field(

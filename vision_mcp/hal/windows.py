@@ -131,5 +131,13 @@ class WindowsHAL(IDesktopHAL):
         """Queries Windows using Win32 EnumWindows or pywinauto."""
         return []
 
+    def get_active_window(self) -> Optional[WindowInfo]:
+        """Returns the currently active window on Windows."""
+        windows = self.list_windows()
+        for win in windows:
+            if win.is_active:
+                return win
+        return None
+
     def focus_window(self, window_id: str) -> bool:
         return False

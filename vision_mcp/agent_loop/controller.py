@@ -7,12 +7,13 @@ from PIL import Image
 from vision_mcp.hal.base import IDesktopHAL
 from vision_mcp.perception.capture import CapturePipeline
 from vision_mcp.perception.som import SetOfMarksGenerator
-from vision_mcp.perception.atspi import ATSPIInspector
-from vision_mcp.perception.cv_detector import CVDetector
+from vision_mcp.perception.grounding.engine import GroundingEngine
+from vision_mcp.perception.token_optimizer import TokenOptimizer
 from vision_mcp.types import (
     ScreenshotResult,
     UIElement,
     ActionVerificationResult,
+    FindElementResult,
     BoundingBox,
 )
 from vision_mcp.config import CONFIG
@@ -21,35 +22,44 @@ from vision_mcp.config import CONFIG
 class FeedbackLoopController:
     """
     Coordinates perception, action execution, and post-action verification.
-    Maintains active Set-of-Marks mapping so agents can interact via numeric mark IDs.
+    Integrates the pluggable GroundingEngine (ensemble, semantic, cv, template),
+    TokenOptimizer (delta patching, ROI crops), and Set-of-Marks mapping.
     """
 
     def __init__(self, hal: IDesktopHAL) -> None:
         self.hal = hal
         self.pipeline = CapturePipeline(hal)
         self.som_generator = SetOfMarksGenerator()
-        self.atspi_inspector = ATSPIInspector()
-        self.cv_detector = CVDetector()
+        self.grounding_engine = GroundingEngine()
+        self.token_optimizer = TokenOptimizer()
+
+        # Backward compatibility aliases
+        self.atspi_inspector = self.grounding_engine._semantic.inspector
+        self.cv_detector = self.grounding_engine._cv.detector
+
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
+        self.last_clean_frame: Optional[Image.Image] = None
 
     def capture_state(
         self,
         mode: str = "annotated_som",
         app_filter: Optional[str] = None,
         region: Optional[Tuple[int, int, int, int]] = None,
+        strategy_override: Optional[str] = None,
         compress_quality: int = CONFIG.image_quality,
     ) -> ScreenshotResult:
         """
-        Captures current desktop state with optional Set-of-Marks annotations.
+        Captures current desktop state with Set-of-Marks and pluggable grounding.
 
         Args:
-            mode: 'annotated_som' (hybrid AT-SPI with CV fallback),
-                  'annotated_cv' (force pure computer vision detection),
-                  'raw' (unmodified screenshot),
-                  or 'cursor_only' (screenshot with virtual pointer).
-            app_filter: Filter for AT-SPI application inspection.
+            mode: 'annotated_som' (uses active grounding strategy or ensemble),
+                  'annotated_cv' (forces pure computer vision),
+                  'raw' (clean screenshot without annotations),
+                  'cursor_only' (clean screenshot with virtual pointer).
+            app_filter: Optional filter for AT-SPI inspection.
             region: Optional (x, y, w, h) sub-region.
+            strategy_override: Optional override for grounding provider ('semantic', 'cv', 'template', 'ensemble').
             compress_quality: JPEG compression factor.
 
         Returns:
@@ -65,15 +75,15 @@ class FeedbackLoopController:
         marks_list: List[UIElement] = []
 
         if mode in ("annotated_som", "annotated_cv"):
-            raw_elements: List[UIElement] = []
-
-            # Try AT-SPI first if not forcing pure CV
-            if mode != "annotated_cv":
-                raw_elements = self.atspi_inspector.inspect_desktop(app_name_filter=app_filter)
-
-            # Fallback to Computer Vision edge & contour detection if AT-SPI returns no elements
-            if not raw_elements:
-                raw_elements = self.cv_detector.detect(img, scale_factor=scale_factor)
+            # Determine grounding strategy
+            strat = "cv" if mode == "annotated_cv" else strategy_override
+            raw_elements = self.grounding_engine.detect_elements(
+                image=img,
+                scale_factor=scale_factor,
+                strategy_override=strat,
+                app_filter=app_filter,
+                region=region,
+            )
 
             if raw_elements:
                 img, self.active_marks = self.som_generator.annotate(
@@ -87,6 +97,7 @@ class FeedbackLoopController:
         else:
             self.active_marks = {}
 
+        self.last_clean_frame = img
         self.last_screenshot_meta = (orig_w, orig_h, scale_factor)
         b64 = self.pipeline.encode_image(img, format="JPEG", quality=compress_quality)
 
@@ -102,6 +113,52 @@ class FeedbackLoopController:
             cursor_position=cursor_pos,
         )
 
+    def find_element(
+        self,
+        query: str,
+        role: Optional[str] = None,
+        fuzzy: bool = True,
+        strategy_override: Optional[str] = None,
+    ) -> FindElementResult:
+        """
+        Autonomous element search by text label, accessible name, or role.
+        Enables one-shot coordinate resolution with zero screenshot token overhead.
+        """
+        # Capture current screen frame for CV/Ensemble fallback if needed
+        clean_img, scale_factor, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=True)
+        candidates = self.grounding_engine.find_element(
+            query=query,
+            image=clean_img,
+            scale_factor=scale_factor,
+            fuzzy=fuzzy,
+            strategy_override=strategy_override,
+        )
+
+        # Filter by role if specified
+        if role:
+            r_low = role.lower().strip()
+            candidates = [c for c in candidates if r_low in (c.role or "").lower()]
+
+        if not candidates:
+            return FindElementResult(
+                found=False,
+                query=query,
+                element=None,
+                center_coords=None,
+                confidence=0.0,
+                candidates_count=0,
+            )
+
+        best = candidates[0]
+        return FindElementResult(
+            found=True,
+            query=query,
+            element=best,
+            center_coords=best.bbox.center,
+            confidence=1.0,
+            candidates_count=len(candidates),
+        )
+
     def execute_with_verification(
         self,
         action_name: str,
@@ -111,15 +168,6 @@ class FeedbackLoopController:
     ) -> ActionVerificationResult:
         """
         Executes action with automated before-and-after visual delta verification.
-
-        Args:
-            action_name: Descriptive name (e.g., 'click', 'type').
-            action_func: Callable that executes the physical HAL interaction.
-            settle_time_sec: Time to wait for UI animation or transition after action.
-            verify_delta: If True, compares screenshots before and after to verify visual reaction.
-
-        Returns:
-            ActionVerificationResult documenting execution success and visual change.
         """
         before_img: Optional[Image.Image] = None
         if verify_delta:
@@ -175,13 +223,20 @@ class FeedbackLoopController:
 
     def resolve_target_coordinates(
         self,
+        query: Optional[str] = None,
         mark_id: Optional[int] = None,
         x: Optional[int] = None,
         y: Optional[int] = None,
     ) -> Tuple[int, int]:
         """
-        Resolves target coordinates from either a Set-of-Marks ID or physical coordinates.
+        Resolves target coordinates from text query, mark ID, or explicit (x, y) coordinates.
         """
+        if query:
+            res = self.find_element(query=query)
+            if res.found and res.center_coords:
+                return res.center_coords
+            raise ValueError(f"Could not find element matching query '{query}'.")
+
         if mark_id is not None:
             if mark_id not in self.active_marks:
                 raise ValueError(
@@ -195,4 +250,94 @@ class FeedbackLoopController:
         if x is not None and y is not None:
             return int(x), int(y)
 
-        raise ValueError("Must provide either 'mark_id' or both 'x' and 'y' coordinates.")
+        raise ValueError("Must provide either 'query', 'mark_id', or both 'x' and 'y' coordinates.")
+
+    def click_and_type(
+        self,
+        text: str,
+        query: Optional[str] = None,
+        mark_id: Optional[int] = None,
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        clear_first: bool = False,
+        press_enter: bool = False,
+        delay_ms: float = CONFIG.typing_delay_ms,
+        verify_delta: bool = True,
+    ) -> ActionVerificationResult:
+        """
+        Compound action: Focuses element, optionally clears existing content, types text,
+        and optionally presses Enter, all with verified post-action delta.
+        """
+        target_x, target_y = self.resolve_target_coordinates(query=query, mark_id=mark_id, x=x, y=y)
+
+        def _do_compound():
+            # 1. Click to focus
+            self.hal.mouse_click(target_x, target_y, button="left", click_count=1)
+            time.sleep(0.08)
+
+            # 2. Clear if requested (Ctrl+A then Backspace)
+            if clear_first:
+                self.hal.keyboard_hotkey(["ctrl", "a"])
+                time.sleep(0.03)
+                self.hal.keyboard_press_key("backspace")
+                time.sleep(0.03)
+
+            # 3. Type text
+            self.hal.keyboard_type(text, delay_ms=delay_ms)
+
+            # 4. Press enter if requested
+            if press_enter:
+                time.sleep(0.05)
+                self.hal.keyboard_press_key("enter")
+
+        return self.execute_with_verification(
+            action_name=f"click_and_type(len={len(text)}, enter={press_enter}) at ({target_x}, {target_y})",
+            action_func=_do_compound,
+            verify_delta=verify_delta,
+        )
+
+    def find_and_click(
+        self,
+        query: str,
+        button: str = "left",
+        click_count: int = 1,
+        verify_delta: bool = True,
+    ) -> ActionVerificationResult:
+        """
+        Autonomous one-shot action: Finds element by text label and clicks it.
+        """
+        target_x, target_y = self.resolve_target_coordinates(query=query)
+
+        def _do_click():
+            self.hal.mouse_click(target_x, target_y, button=button, click_count=click_count)
+
+        return self.execute_with_verification(
+            action_name=f"find_and_click('{query}', {button}) at ({target_x}, {target_y})",
+            action_func=_do_click,
+            verify_delta=verify_delta,
+        )
+
+    def scroll_until_visible(
+        self,
+        query: str,
+        direction: str = "down",
+        max_scrolls: int = 6,
+        scroll_amount: int = 6,
+        verify_delta: bool = True,
+    ) -> FindElementResult:
+        """
+        Iteratively scrolls the viewport until the query element is discovered.
+        """
+        for scroll_idx in range(max_scrolls):
+            # Check if element is currently visible
+            res = self.find_element(query=query)
+            if res.found:
+                return res
+
+            # Scroll in target direction
+            dy = -scroll_amount if direction == "down" else scroll_amount
+            self.hal.mouse_scroll(dx=0, dy=dy)
+            time.sleep(0.35)
+
+        # Final check
+        return self.find_element(query=query)

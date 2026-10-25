@@ -87,6 +87,11 @@ class IDesktopHAL(ABC):
         pass
 
     @abstractmethod
+    def get_active_window(self) -> Optional[WindowInfo]:
+        """Returns the currently active / focused top-level window if available."""
+        pass
+
+    @abstractmethod
     def focus_window(self, window_id: str) -> bool:
         """Brings the window identified by window_id to the foreground."""
         pass

@@ -2,27 +2,29 @@
 
 An autonomous **Vision Control Model Context Protocol (MCP)** server that enables multimodal AI agents (Antigravity, Claude, Gemini CLI, local VLMs) to perceive, reason about, and physically navigate Linux desktop environments (X11 & Wayland) as well as Windows systems.
 
-Built with a **continuous perception-action-verification feedback loop**, the server combines semantic OS accessibility trees with visual Set-of-Marks (SoM) prompting to eliminate coordinate hallucination and provide rock-solid desktop automation across terminal, browser, and complex desktop applications.
+Built with a **continuous perception-action-verification feedback loop**, the server combines semantic OS accessibility trees, pure Computer Vision, visual Set-of-Marks (SoM) prompting, and high-level compound actions to eliminate coordinate hallucination, dramatically minimize token consumption, and provide rock-solid desktop automation.
 
 ---
 
-## 1. Key Architectural Features
+## 1. Key Architectural Enhancements
 
-* **Triple Grounding Strategy (Semantic + Pure Computer Vision + Set-of-Marks):**
-  * **Semantic Grounding (AT-SPI2 / D-Bus):** Directly inspects the Linux accessibility bus (`org.a11y.Bus`) to retrieve exact button names, text fields, menu hierarchies, roles, and physical bounding boxes without relying purely on pixel guessing.
-  * **Pure Computer Vision Grounding Fallback (`CVDetector`):** When interacting with applications that lack AT-SPI trees (canvas-based web apps, games, legacy X11 utilities), an OpenCV-powered edge/contour and MSER text-region detector automatically discovers interactive bounding boxes directly from screenshot pixels.
-  * **Visual Prompting (Set-of-Marks / SoM):** Overlays high-contrast, numbered badges onto interactive UI elements. The LLM simply outputs `click(mark_id=4)` instead of predicting floating-point coordinates.
+* **Hotswappable Pluggable Grounding Engine (`GroundingEngine`):**
+  * **Ensemble Strategy (Default):** Fuses semantic OS accessibility trees with Computer Vision contours and template matching using Non-Maximum Suppression (IoU deduplication). Semantic names and roles enrich visual bounding boxes.
+  * **Semantic Strategy:** Directly inspects Linux AT-SPI2 / D-Bus (`org.a11y.Bus`) for 100% ground-truth element names, text fields, menu hierarchies, roles, and physical bounding boxes.
+  * **Pure Computer Vision Strategy (`CVDetector`):** Detects interactive components directly from screenshot pixels via multi-scale Canny edge contours and MSER text regions for canvas web apps, games, and legacy X11 utilities.
+  * **Template Matching Strategy:** Matches specific icons or UI widgets using normalized cross-correlation (`cv2.TM_CCOEFF_NORMED` and `TM_SQDIFF_NORMED`).
+  * **Dynamic Hotswapping:** Switch strategies on the fly using `configure_vision(setting="grounding_strategy", value="semantic")`.
+* **Zero-Token Element Lookup (`find_element` & `find_and_click`):**
+  * Allows agents to locate and click buttons or fields by text label without sending expensive full-screen images into LLM multimodal context.
+* **Atomic Compound Actions (`click_and_type`):**
+  * Combines element focusing, text clearing (`Ctrl+A` $\rightarrow$ `Backspace`), typing with cadence, Enter submission, and visual delta verification in a single atomic tool call.
+* **Token & Context Optimizer (`TokenOptimizer`):**
+  * Isolates localized delta patches between before-and-after frames to compress visual verification payloads by 70–90%.
 * **Closed-Loop Feedback & Delta Verification:**
-  * Every physical action (click, type, hotkey, scroll) automatically captures pre- and post-action observation frames.
-  * Measures visual pixel deltas to verify whether the screen reacted (e.g., verifying a dropdown opened or text was entered) before proceeding to the next step.
+  * Every physical action automatically calculates visual pixel deltas ($\Delta_{ratio}$) to confirm whether the UI reacted before proceeding.
 * **Hardware Abstraction Layer (HAL):**
-  * **Linux Backend:** Auto-detects X11 vs Wayland. Employs `mss` for sub-80ms screen capture, `pynput` and `XTest` for input injection, and `python-xlib` for window hierarchy and focus control.
-  * **Windows Backend:** Extensible HAL architecture architected for GPU DXGI duplication (`dxcam`), Win32 `SendInput` with `PerMonitorV2` DPI scaling awareness, and `UIA3`.
-* **VLM Token & Latency Optimization:**
-  * Raw 4K screenshots (3024x1898) consume megabytes and excessive multimodal tokens.
-  * Dynamic aspect-ratio-preserving downscaling (configurable max dimension, default 1600px) and JPEG/WebP compression keep frame payloads under 250KB while preserving crisp text legibility.
-* **Hybrid Vision + Terminal Workflow:**
-  * Includes a sandboxed `run_terminal_command` tool for tasks where command-line execution is vastly faster than clicking menus (e.g. launching processes, checking disk space, inspecting logs).
+  * **Linux Backend:** Native X11 window management with robust `_NET_ACTIVE_WINDOW` ClientMessage event dispatching, fallback stack-raising, active window tracking, and `mss` screen capture.
+  * **Windows Backend:** Extensible HAL architected for GPU DXGI duplication (`dxcam`), Win32 `SendInput` with `PerMonitorV2` DPI scaling awareness, and `UIA3`.
 
 ---
 
@@ -35,15 +37,22 @@ flowchart TB
     end
 
     subgraph MCP ["Vision Control MCP Server"]
-        Router["FastMCP Tool Router"]
+        Router["FastMCP Tool Router (20 Tools)"]
         LoopEngine["Feedback & Verification Controller"]
 
-        subgraph Perception ["Perception Engine"]
+        subgraph GroundingEngine ["Pluggable Grounding Engine"]
+            Ensemble["Ensemble Provider (NMS / IoU Fusion)"]
+            Semantic["Semantic Provider (AT-SPI2 / D-Bus)"]
+            CV["Pure CV Provider (Canny / MSER)"]
+            Template["Template Matcher (OpenCV)"]
+            Hotswap["Strategy Hotswap Coordinator"]
+        end
+
+        subgraph Perception ["Perception & Token Optimization"]
             CapPipe["Screen Capture Pipeline (mss)"]
             CursorDraw["Virtual Pointer Overlay"]
-            ATSPITree["AT-SPI2 D-Bus Inspector"]
-            SoMGen["Set-of-Marks (SoM) Badge Generator"]
-            Compressor["Token & Resolution Optimizer"]
+            SoMGen["Set-of-Marks (SoM) Generator"]
+            TokenOpt["Token Optimizer (Delta Patch / ROI)"]
         end
 
         subgraph HAL ["Hardware Abstraction Layer (HAL)"]
@@ -62,127 +71,58 @@ flowchart TB
 
     LLM <-->|"MCP JSON-RPC (stdio / SSE)"| Router
     Router --> LoopEngine
+    LoopEngine --> GroundingEngine
     LoopEngine --> Perception
     LoopEngine --> HALFactory
+
+    GroundingEngine --> Ensemble
+    Ensemble --> Semantic
+    Ensemble --> CV
+    Ensemble --> Template
 
     HALFactory --> LinuxHAL
     HALFactory --> WinHAL
 
-    Perception --> CapPipe
-    Perception --> ATSPITree
-    Perception --> SoMGen
-    CapPipe --> CursorDraw --> Compressor
-
     LinuxHAL --> X11
     LinuxHAL --> WaylandPortal
-    ATSPITree --> ATSPIDBus
+    Semantic --> ATSPIDBus
     X11 & WaylandPortal & ATSPIDBus --> Apps
 ```
 
 ---
 
-## 3. Tool Catalog (13 MCP Tools)
+## 3. Tool Catalog (20 MCP Tools)
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `take_screenshot` | `mode` (`annotated_som`, `cursor_only`, `raw`), `app_filter`, `region` | Captures screen with optional Set-of-Marks badge overlays and virtual cursor. |
+| `take_screenshot` | `mode`, `app_filter`, `region`, `strategy_override` | Captures screen with optional Set-of-Marks badge overlays and virtual cursor. |
 | `get_accessibility_tree` | `app_name_filter`, `max_depth`, `filter_interactable` | Queries AT-SPI2 for semantic widget hierarchy, roles, and screen bounding boxes. |
-| `click` | `mark_id` (optional), `x`, `y`, `button`, `click_count`, `verify_delta` | Clicks either a numbered mark badge or specific (x, y) coordinates with verification. |
+| `find_element` | `query`, `role`, `fuzzy`, `strategy` | **Zero-Token Search:** Resolves element physical coordinates by label/role without image tokens. |
+| `click` | `mark_id`, `x`, `y`, `query`, `button`, `click_count`, `verify_delta` | Clicks either a mark badge, query match, or coordinates with automated verification. |
+| `click_and_type` | `text`, `query`, `mark_id`, `x`, `y`, `clear_first`, `press_enter`, `delay_ms` | **Compound Action:** Focuses target, clears content, types text, and presses Enter. |
+| `find_and_click` | `query`, `button`, `click_count`, `verify_delta` | Autonomous one-shot find-by-text and click with verified visual delta. |
 | `move_cursor` | `x`, `y` | Moves pointer to absolute desktop coordinates without clicking. |
 | `drag_and_drop` | `start_x`, `start_y`, `end_x`, `end_y`, `duration_sec`, `verify_delta` | Performs smooth mouse drag from start coordinates to end coordinates. |
-| `scroll` | `direction` (`up`, `down`, `left`, `right`), `amount`, `verify_delta` | Emulates mouse wheel scrolling at current cursor position. |
+| `scroll` | `direction` (`up`/`down`/`left`/`right`), `amount`, `verify_delta` | Emulates mouse wheel scrolling at current cursor position. |
+| `scroll_until_visible`| `query`, `direction`, `max_scrolls`, `scroll_amount` | Iteratively scrolls viewport until target element or text becomes visible. |
 | `type_text` | `text`, `press_enter`, `delay_ms`, `verify_delta` | Types text into the focused UI element with human-like cadence. |
-| `press_key` | `key` (`enter`, `tab`, `escape`, `backspace`, `space`, `f5`, etc.), `verify_delta` | Presses and releases a single key. |
-| `hotkey` | `combo` (`ctrl+c`, `ctrl+alt+t`, `alt+tab`, etc.), `verify_delta` | Sends keyboard chords with automatic release sequencing. |
+| `press_key` | `key`, `verify_delta` | Presses and releases a single key (`enter`, `tab`, `escape`, `backspace`, etc.). |
+| `hotkey` | `combo` (`ctrl+c`, `ctrl+a`, `alt+tab`), `verify_delta` | Sends keyboard chords with automatic release sequencing. |
 | `list_windows` | None | Lists open windows with window IDs, titles, bounding boxes, and active focus. |
-| `focus_window` | `window_id` | Brings requested window to the foreground. |
-| `run_terminal_command` | `command`, `timeout_seconds` | Runs headless shell command for hybrid CLI + GUI navigation. |
+| `get_active_window` | None | Returns metadata for the currently focused desktop window. |
+| `focus_window` | `window_id` | Brings requested window to the foreground and grants input focus. |
+| `configure_vision` | `setting`, `value` | Dynamically hotswaps runtime settings (`grounding_strategy`, image dimensions, etc.). |
+| `get_vision_diagnostics`| None | Reports system health, display server, screen bounds, and active grounding engine. |
+| `run_terminal_command`| `command`, `timeout_seconds` | Runs headless shell command for hybrid CLI + GUI navigation. |
 | `wait_for_ui_change` | `timeout_seconds`, `poll_interval_sec`, `min_delta_ratio` | Blocks until visual change is detected (e.g. waiting for page load). |
 
 ---
 
-## 4. Installation & Quickstart
+## 4. Test Suite Execution
 
-### Prerequisites
-* Linux (Ubuntu 22.04+, Debian 12+, Fedora, Arch) with X11 or Wayland
-* Python 3.10+
-* System packages for AT-SPI2 and X11:
-  ```bash
-  sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-atspi-2.0 at-spi2-core
-  ```
-
-### Virtual Environment Setup
 ```bash
 cd /home/mk/DV/git/Vision
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-pip install -e .
+.venv/bin/pytest -v
 ```
 
-### Running the Test Suite
-```bash
-pytest -v
-```
-
----
-
-## 5. Integrating with AI Clients
-
-### Antigravity / Claude Desktop / Claude Code Configuration
-Add the server entry to your MCP configuration (`~/.gemini/antigravity-ide/mcp_config.json` or `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "vision-control": {
-      "command": "/home/mk/DV/git/Vision/.venv/bin/python3",
-      "args": ["-m", "vision_mcp.server"],
-      "env": {
-        "DISPLAY": ":0",
-        "PYTHONUNBUFFERED": "1"
-      }
-    }
-  }
-}
-```
-
----
-
-## 6. Project Layout
-
-```
-Vision/
-├── pyproject.toml              # Build backend and project metadata
-├── requirements.txt            # Python dependencies
-├── README.md                   # Documentation and usage guide
-├── vision_mcp/
-│   ├── __init__.py
-│   ├── config.py               # Runtime settings (scaling, quality, safety failsafes)
-│   ├── types.py                # Pydantic schemas (UIElement, BoundingBox, WindowInfo)
-│   ├── hal/                    # Hardware Abstraction Layer
-│   │   ├── base.py             # IDesktopHAL abstract interface
-│   │   ├── factory.py          # Platform detector (Linux vs Windows)
-│   │   ├── linux.py            # Linux HAL (mss, pynput, python-xlib)
-│   │   └── windows.py          # Windows HAL (DXGI, SendInput, UIA3)
-│   ├── perception/             # Vision & Semantic Grounding
-│   │   ├── capture.py          # Screenshot pipeline, downscaling, cursor rendering
-│   │   ├── som.py              # Set-of-Marks numbered badge generator
-│   │   └── atspi.py            # AT-SPI2 D-Bus accessibility tree inspector
-│   ├── agent_loop/             # Closed-Loop Feedback
-│   │   └── controller.py       # Execution with pre/post visual delta verification
-│   └── server.py               # FastMCP Server exposing 13 navigation tools
-└── tests/
-    ├── conftest.py             # Pytest fixtures and mock desktop HAL
-    ├── test_hal.py             # Unit tests for HAL and failsafes
-    ├── test_som.py             # Unit tests for Set-of-Marks and scaling
-    ├── test_loop.py            # Unit tests for delta verification
-    └── test_server.py          # Integration tests for tool execution
-```
-
----
-
-## 7. Safety & Guardrails
-
-* **Failsafe Corner:** Moving the mouse cursor or forcing an action to `(0, 0)` triggers an immediate emergency abort (`RuntimeError`), stopping any automated drag or repeating loop.
-* **Input Cooldown:** Configurable 50ms action cooldown (`CONFIG.action_cooldown_ms`) prevents event flooding and allows the display server event queue to settle.
-* **Resolution Independence:** All clicks and Set-of-Marks coordinates automatically preserve physical screen space regardless of image downscaling factors.
+All 21 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, and compound tools.

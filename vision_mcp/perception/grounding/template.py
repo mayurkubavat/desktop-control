@@ -1,0 +1,110 @@
+"""Visual Template & Icon Grounding Provider using OpenCV Pattern Matching."""
+
+from typing import List, Optional, Tuple, Dict
+import numpy as np
+from PIL import Image
+import cv2
+
+from vision_mcp.perception.grounding.base import BaseGroundingProvider
+from vision_mcp.types import UIElement, BoundingBox
+
+
+class TemplateGroundingProvider(BaseGroundingProvider):
+    """
+    Grounding provider that matches specific visual icons or UI snippets using
+    OpenCV normalized cross-correlation (cv2.TM_CCOEFF_NORMED).
+    """
+
+    def __init__(self, match_threshold: float = 0.80) -> None:
+        self.match_threshold = match_threshold
+        self._templates: Dict[str, np.ndarray] = {}
+
+    @property
+    def name(self) -> str:
+        return "template"
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    def register_template(self, name: str, template_img: Image.Image) -> None:
+        """Registers a named icon or button template image."""
+        np_tpl = cv2.cvtColor(np.array(template_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        self._templates[name] = np_tpl
+
+    def detect(
+        self,
+        image: Image.Image,
+        scale_factor: float = 1.0,
+        app_filter: Optional[str] = None,
+        region: Optional[Tuple[int, int, int, int]] = None,
+    ) -> List[UIElement]:
+        """Matches all registered templates against the current screen image."""
+        if not self._templates:
+            return []
+
+        screen_bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        elements: List[UIElement] = []
+        elem_id = 1
+
+        for name, tpl in self._templates.items():
+            th, tw = tpl.shape[:2]
+            if screen_bgr.shape[0] < th or screen_bgr.shape[1] < tw:
+                continue
+
+            # Check for non-zero variance to prevent division by zero in TM_CCOEFF_NORMED
+            if np.std(tpl) < 1e-3:
+                # Fallback to normalized square difference for solid templates
+                res = cv2.matchTemplate(screen_bgr, tpl, cv2.TM_SQDIFF_NORMED)
+                min_val, _, min_loc, _ = cv2.minMaxLoc(res)
+                if min_val <= (1.0 - self.match_threshold):
+                    pt = min_loc
+                    orig_x = int(pt[0] / scale_factor)
+                    orig_y = int(pt[1] / scale_factor)
+                    orig_w = int(tw / scale_factor)
+                    orig_h = int(th / scale_factor)
+                    elements.append(
+                        UIElement(
+                            id=elem_id,
+                            role="template_match",
+                            name=name,
+                            bbox=BoundingBox(
+                                x=orig_x,
+                                y=orig_y,
+                                width=orig_w,
+                                height=orig_h,
+                            ),
+                            interactable=True,
+                            states=["matched"],
+                        )
+                    )
+                    elem_id += 1
+                continue
+
+            res = cv2.matchTemplate(screen_bgr, tpl, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+            if max_val >= self.match_threshold:
+                pt = max_loc
+                orig_x = int(pt[0] / scale_factor)
+                orig_y = int(pt[1] / scale_factor)
+                orig_w = int(tw / scale_factor)
+                orig_h = int(th / scale_factor)
+
+                elements.append(
+                    UIElement(
+                        id=elem_id,
+                        role="template_match",
+                        name=name,
+                        bbox=BoundingBox(
+                            x=orig_x,
+                            y=orig_y,
+                            width=orig_w,
+                            height=orig_h,
+                        ),
+                        interactable=True,
+                        states=["matched"],
+                    )
+                )
+                elem_id += 1
+
+        return elements

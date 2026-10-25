@@ -8,6 +8,7 @@ import mss
 from pynput.mouse import Controller as MouseController, Button
 from pynput.keyboard import Controller as KeyboardController, Key
 from Xlib import X, display, error as xlib_error
+from Xlib.protocol import event as protocol_event
 
 from vision_mcp.hal.base import IDesktopHAL
 from vision_mcp.types import WindowInfo, BoundingBox
@@ -226,8 +227,16 @@ class LinuxHAL(IDesktopHAL):
         except Exception:
             return []
 
+    def get_active_window(self) -> Optional[WindowInfo]:
+        """Returns the currently active / focused window."""
+        windows = self.list_windows()
+        for win in windows:
+            if win.is_active:
+                return win
+        return None
+
     def focus_window(self, window_id: str) -> bool:
-        """Focuses target window using _NET_ACTIVE_WINDOW."""
+        """Focuses target window using _NET_ACTIVE_WINDOW and fallback stack-raising."""
         if not self._x_display:
             return False
 
@@ -236,12 +245,23 @@ class LinuxHAL(IDesktopHAL):
             root = self._x_display.screen().root
             net_active_win = self._x_display.intern_atom("_NET_ACTIVE_WINDOW")
             
-            event = xlib_error.display.protocol.event.ClientMessage(
+            # 1. Send EWMH _NET_ACTIVE_WINDOW ClientMessage to root window manager
+            event = protocol_event.ClientMessage(
                 window=win_int,
                 client_type=net_active_win,
                 data=(32, [1, X.CurrentTime, 0, 0, 0]),
             )
             root.send_event(event, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+
+            # 2. Direct window map and configure fallback in case WM doesn't redirect
+            try:
+                win = self._x_display.create_resource_object("window", win_int)
+                win.map()
+                win.configure(stack_mode=X.Above)
+                self._x_display.set_input_focus(win, X.RevertToParent, X.CurrentTime)
+            except Exception:
+                pass
+
             self._x_display.sync()
             time.sleep(CONFIG.action_cooldown_ms / 1000.0)
             return True

@@ -61,3 +61,26 @@ class ActionVerificationResult(BaseModel):
     delta_detected: bool = Field(default=False, description="Whether a visual screen change was observed post-action")
     change_ratio: float = Field(default=0.0, description="Fraction of pixels altered in region of interest")
     message: str = Field(default="", description="Status or error message")
+
+
+class FindElementResult(BaseModel):
+    """Result of an autonomous element search by text, role, or label."""
+    found: bool = Field(description="Whether a matching element was discovered")
+    query: str = Field(description="Search query string or pattern")
+    element: Optional[UIElement] = Field(default=None, description="Best matching UI element if found")
+    center_coords: Optional[tuple[int, int]] = Field(default=None, description="Exact physical (x, y) coordinates for clicking")
+    confidence: float = Field(default=1.0, description="Match confidence score (0.0 to 1.0)")
+    candidates_count: int = Field(default=0, description="Total matching candidates discovered")
+
+
+class DiagnosticsResult(BaseModel):
+    """Diagnostic health check of the Vision MCP server and perception backends."""
+    platform: str = Field(description="Host OS platform (linux, win32, darwin)")
+    display_server: str = Field(description="Display environment (X11, Wayland, Windows GDI/DXGI)")
+    primary_screen_size: tuple[int, int] = Field(description="Primary display resolution (w, h)")
+    active_grounding_strategy: str = Field(description="Current grounding engine mode")
+    atspi_available: bool = Field(description="Whether Linux AT-SPI2 accessibility bus is active")
+    opencv_available: bool = Field(description="Whether OpenCV contour detection is active")
+    supported_grounding_providers: List[str] = Field(description="List of registered grounding providers")
+    active_window: Optional[str] = Field(default=None, description="Currently focused window title")
+    config_summary: Dict[str, Any] = Field(description="Active configuration parameters")

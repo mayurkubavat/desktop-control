@@ -20,8 +20,24 @@ class VisionConfig(BaseModel):
         default=True,
         description="Whether to draw a virtual cursor overlay on captured screenshots.",
     )
+    token_optimization_mode: str = Field(
+        default="standard",
+        description="Token optimization mode: 'standard', 'delta_patch', 'thumbnail_roi'.",
+    )
 
-    # Set-of-Marks (SoM) Visual Overlay
+    # Set-of-Marks (SoM) & Grounding Strategy
+    grounding_strategy: str = Field(
+        default="ensemble",
+        description="Active grounding strategy: 'ensemble', 'semantic', 'cv', or 'template'.",
+    )
+    enable_nms_fusion: bool = Field(
+        default=True,
+        description="Whether to use Non-Maximum Suppression to deduplicate fused detections.",
+    )
+    nms_iou_threshold: float = Field(
+        default=0.40,
+        description="Intersection-over-Union threshold for fusing overlapping marks.",
+    )
     som_badge_font_size: int = Field(
         default=14,
         description="Font size for SoM numeric badge overlays.",

@@ -73,6 +73,12 @@ class MockDesktopHAL(IDesktopHAL):
             ),
         ]
 
+    def get_active_window(self) -> Optional[WindowInfo]:
+        for win in self.list_windows():
+            if win.is_active:
+                return win
+        return None
+
     def focus_window(self, window_id: str) -> bool:
         return window_id in ("0x1000", "0x2000")
 

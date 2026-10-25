@@ -15,6 +15,7 @@ import numpy as np
 
 from vision_mcp.config import CONFIG
 from vision_mcp.types import BoundingBox
+from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +23,20 @@ logger = logging.getLogger(__name__)
 class LocalNeuralGrounder:
     """
     Local grounding sidecar interfacing with POSIX shared memory (/dev/shm)
-    and running low-latency neural/CV visual proposals.
+    and running low-latency neural/CV visual proposals and local Gemma 3 VLM grounding.
     """
 
     def __init__(
         self,
         shm_path: str = CONFIG.vdom_sidecar_shm_path,
         onnx_model_path: Optional[str] = None,
+        enable_gemma3: bool = CONFIG.enable_gemma3_sidecar,
     ) -> None:
         self.shm_path = shm_path
         self.onnx_model_path = onnx_model_path
         self._onnx_session = None
+        self.enable_gemma3 = enable_gemma3
+        self.gemma3_grounder = Gemma3Grounder() if enable_gemma3 else None
 
         if self.onnx_model_path and os.path.exists(self.onnx_model_path):
             self._init_onnx()
@@ -84,6 +88,29 @@ class LocalNeuralGrounder:
 
         # High-speed CV proposal generator (fallback)
         return self._generate_cv_proposals(image, offset)
+
+    def ground_subpane(
+        self,
+        image: Image.Image,
+        offset: Tuple[int, int] = (0, 0),
+        anchor_id: str = "default",
+        task_intent: str = "ground_ui",
+    ) -> List[Dict[str, Any]]:
+        """
+        Runs high-precision cognitive grounding on a sub-pane ROI using local Gemma 3.
+        Falls back to CV proposals if Gemma 3 is disabled, unavailable, or yields no detections.
+        """
+        if self.enable_gemma3 and self.gemma3_grounder:
+            proposals = self.gemma3_grounder.ground_roi(
+                image=image,
+                offset=offset,
+                anchor_id=anchor_id,
+                task_intent=task_intent,
+            )
+            if proposals:
+                return proposals
+
+        return self.generate_proposals(image, offset)
 
     def _run_onnx_inference(self, image: Image.Image, offset: Tuple[int, int]) -> List[Dict[str, Any]]:
         """Runs batched ONNX tensor inference on the frame."""

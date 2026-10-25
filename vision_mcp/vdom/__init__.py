@@ -9,10 +9,14 @@ from vision_mcp.vdom.fusion import VDOMFusionEngine
 from vision_mcp.vdom.query import VDOMQueryEngine
 from vision_mcp.vdom.sidecar import LocalNeuralGrounder
 from vision_mcp.vdom.layout import SubPaneLayoutSolver
+from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder, SemanticROICache, compute_dhash
 
 __all__ = [
     "VDOMFusionEngine",
     "VDOMQueryEngine",
     "LocalNeuralGrounder",
     "SubPaneLayoutSolver",
+    "Gemma3Grounder",
+    "SemanticROICache",
+    "compute_dhash",
 ]

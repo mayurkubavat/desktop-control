@@ -79,6 +79,36 @@ class VisionConfig(BaseModel):
         description="Containment threshold for nesting unmatched visual elements under parent containers.",
     )
 
+    # Local Gemma 3 Multimodal Sidecar Plugin
+    enable_gemma3_sidecar: bool = Field(
+        default=True,
+        description="Whether to enable on-demand Gemma 3 multimodal grounding for opaque sub-panes and modal triage.",
+    )
+    gemma3_endpoint: str = Field(
+        default="http://127.0.0.1:11434/api/generate",
+        description="Ollama API endpoint for local Gemma 3 inference.",
+    )
+    gemma3_vision_model: str = Field(
+        default="gemma3:4b",
+        description="Model identifier for multimodal visual grounding (Gemma 3 4B-IT).",
+    )
+    gemma3_text_model: str = Field(
+        default="gemma3:1b",
+        description="Model identifier for lightweight text modal risk triage (Gemma 3 1B-IT).",
+    )
+    gemma3_dhash_threshold: int = Field(
+        default=4,
+        description="Perceptual hash Hamming distance threshold for semantic ROI cache hits.",
+    )
+    gemma3_cache_capacity: int = Field(
+        default=256,
+        description="Maximum entries in the local Gemma 3 semantic ROI cache.",
+    )
+    gemma3_timeout_seconds: float = Field(
+        default=25.0,
+        description="Maximum timeout in seconds for local Gemma 3 inference requests.",
+    )
+
     # Dynamic Anchor-Relative Sub-Pane Resolution
     enable_dynamic_subpanes: bool = Field(
         default=True,

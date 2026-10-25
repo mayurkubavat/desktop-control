@@ -31,6 +31,11 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
   * Handling browser permission popups ("Show notifications").
   * Interacting with dynamic dropdowns (e.g. model selector "Flash-Lite" $\rightarrow$ "4 Argon").
   * Cadence-aware text entry and Enter key submission.
+* [[verdi_and_complex_eda_ui_automation|Browser Obstructions, Taskbar Focus & EDA UI Automation]]
+  * Dismissing Chrome permission popups at calibrated coordinates with delta confirmation.
+  * Restoring focus via bottom panel taskbar clicks when terminal commands steal X11 focus.
+  * Streaming generation heuristics and multi-page content scrolling.
+  * Visual ergonomics, hotkey dispatching, and value column reading for EDA tools (Verdi).
 
 ### 3. Agentic Performance & Token Optimization
 * [[zero_token_element_discovery|Zero-Token Element Discovery & Compound Actions]]

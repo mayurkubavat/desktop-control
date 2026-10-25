@@ -40,6 +40,12 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[ui_tool_plugin_architecture|UI Tool Plugin Architecture & Consolidated Strategy]]
   * Handling complex applications with 100s of features (EDA tools, IDEs, CAD suites).
   * Declarative Feature Maps, Sub-Pane ROI routing, automated menu traversal, and phased roadmap.
+* [[phase2_chrome_browser_tool|Phase 2: Chrome Browser Tool & Plugin Architecture]]
+  * Dedicated browser automation plugin combining Playwright/CDP insights with native desktop control.
+  * Tab lifecycle, accessibility tree UID addressing, and web application macro recipes.
+* [[verdi_tool_features_and_ai_automation|Synopsys Verdi Features & AI Automation Blueprint]]
+  * Deep-dive into KDB, FSDB, nTrace, nWave, nSchema, Temporal Flow View, and Transaction debug.
+  * Tactical recommendations for AI vision agents automating 100+ feature dense EDA interfaces.
 
 ---
 

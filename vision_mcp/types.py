@@ -84,3 +84,57 @@ class DiagnosticsResult(BaseModel):
     supported_grounding_providers: List[str] = Field(description="List of registered grounding providers")
     active_window: Optional[str] = Field(default=None, description="Currently focused window title")
     config_summary: Dict[str, Any] = Field(description="Active configuration parameters")
+
+
+class SubPaneROI(BaseModel):
+    """Defines a functional sub-pane within an application window."""
+    name: str = Field(description="Identifier for the pane (e.g. address_bar, tab_strip, waveform_canvas)")
+    description: str = Field(default="", description="Semantic role or description of the sub-pane")
+    relative_x: float = Field(default=0.0, description="Horizontal start offset as fraction of window width [0.0..1.0]")
+    relative_y: float = Field(default=0.0, description="Vertical start offset as fraction of window height [0.0..1.0]")
+    relative_width: float = Field(default=1.0, description="Pane width as fraction of window width [0.0..1.0]")
+    relative_height: float = Field(default=1.0, description="Pane height as fraction of window height [0.0..1.0]")
+    offset_x: int = Field(default=0, description="Fixed pixel offset added to X")
+    offset_y: int = Field(default=0, description="Fixed pixel offset added to Y")
+    fixed_width: Optional[int] = Field(default=None, description="Optional fixed pixel width overriding relative_width")
+    fixed_height: Optional[int] = Field(default=None, description="Optional fixed pixel height overriding relative_height")
+
+    def compute_bounds(self, window_bbox: BoundingBox) -> BoundingBox:
+        """Computes absolute physical screen bounding box relative to host window."""
+        x = window_bbox.x + int(window_bbox.width * self.relative_x) + self.offset_x
+        y = window_bbox.y + int(window_bbox.height * self.relative_y) + self.offset_y
+
+        if self.fixed_width is not None:
+            w = min(self.fixed_width, max(1, window_bbox.width - (x - window_bbox.x)))
+        else:
+            w = int(window_bbox.width * self.relative_width)
+
+        if self.fixed_height is not None:
+            h = min(self.fixed_height, max(1, window_bbox.height - (y - window_bbox.y)))
+        else:
+            h = int(window_bbox.height * self.relative_height) - self.offset_y
+
+        return BoundingBox(x=x, y=y, width=max(1, w), height=max(1, h))
+
+
+class FeatureDescriptor(BaseModel):
+    """Declarative capability supported by an application plugin."""
+    feature_id: str = Field(description="Unique feature identifier (e.g. 'browser.navigate', 'verdi.trace_driver')")
+    name: str = Field(description="Human-readable feature name")
+    description: str = Field(description="Description of what this feature accomplishes")
+    category: str = Field(default="general", description="Category: navigation, editing, view, devtools, macro")
+    hotkey: Optional[str] = Field(default=None, description="Direct keyboard shortcut if applicable (e.g. 'ctrl+l')")
+    menu_path: Optional[List[str]] = Field(default=None, description="Menu navigation path if applicable")
+    target_pane: Optional[str] = Field(default=None, description="Name of sub-pane where feature executes")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Expected parameter schemas")
+
+
+class PluginSummary(BaseModel):
+    """Metadata summary of a registered UI application plugin."""
+    app_id: str = Field(description="Unique application identifier")
+    name: str = Field(description="Display name")
+    description: str = Field(description="Plugin description")
+    is_active: bool = Field(default=False, description="Whether this plugin matches the current active foreground window")
+    supported_panes: List[str] = Field(default_factory=list, description="Names of available sub-panes")
+    features_count: int = Field(default=0, description="Total number of registered features")
+

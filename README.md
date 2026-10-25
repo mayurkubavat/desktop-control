@@ -91,12 +91,16 @@ flowchart TB
 
 ---
 
-## 3. Tool Catalog (23 MCP Tools)
+## 3. Tool Catalog (27 MCP Tools)
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
 | `take_screenshot` | `mode`, `app_filter`, `region`, `window_id`, `clip_to_active_window`, `strategy_override` | Captures screen with optional Set-of-Marks and window clipping. |
 | `capture_window` | `window_id`, `title_filter`, `mode` | **Window-Clipping Perception:** Clips strictly to active or target window (60-80% token reduction). |
+| `capture_pane` | `pane_name`, `window_id`, `title_filter`, `mode` | **Sub-Pane Perception:** Clips strictly to a named functional zone (e.g. `address_bar`, `tab_strip`, `content_area`), reducing tokens by up to 90%. |
+| `list_plugins` | None | Lists registered application plugins (Chrome, Verdi, etc.) and active foreground plugin. |
+| `list_plugin_features` | `plugin_id` | Returns declarative capabilities, hotkeys, and sub-panes for a plugin. |
+| `invoke_plugin_feature` | `feature_id`, `plugin_id`, `args` | Executes high-level capabilities natively with closed-loop delta verification. |
 | `dismiss_obstructions`| `max_attempts` | **Autonomous Defense:** Auto-dismisses modal popups, cookie banners, and permission requests. |
 | `manage_cache` | `action`, `app_key`, `query` | Manages Self-Healing Action Cache (`stats`, `invalidate`, `clear`). |
 | `get_accessibility_tree` | `app_name_filter`, `max_depth`, `filter_interactable` | Queries AT-SPI2 for semantic widget hierarchy, roles, and screen bounding boxes. |
@@ -128,7 +132,7 @@ cd /home/mk/DV/git/Vision
 .venv/bin/pytest -v
 ```
 
-All 26 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, compound tools, Per-Window Perception, Self-Healing Action Cache, and Obstruction Interception.
+All 33 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, compound tools, Per-Window Perception, Self-Healing Action Cache, Obstruction Interception, and Phase 2 UI Application Plugins (ChromeBrowserPlugin, SubPaneROI, FeatureDescriptor, and PluginRegistry).
 
 ---
 

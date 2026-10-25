@@ -591,6 +591,114 @@ def wait_for_ui_change(
     }
 
 
+@mcp_server.tool()
+def list_plugins() -> List[Dict[str, Any]]:
+    """
+    Lists all registered UI Application Plugins and reports which is currently active.
+    
+    Returns:
+        List of plugin summaries including app_id, name, is_active, and supported sub-panes.
+    """
+    act_win = hal.get_active_window()
+    active_title = act_win.title if act_win else None
+    summaries = controller.plugin_registry.list_all(active_window_title=active_title)
+    return [s.model_dump() for s in summaries]
+
+
+@mcp_server.tool()
+def list_plugin_features(
+    plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Returns the declarative feature catalog and hotkeys for an application plugin.
+    
+    Args:
+        plugin_id: Target plugin identifier ('chrome', 'verdi', etc.). If None, detects active window.
+        
+    Returns:
+        Dictionary containing plugin metadata and list of feature descriptors.
+    """
+    plugin = None
+    if plugin_id:
+        plugin = controller.plugin_registry.get(plugin_id)
+    else:
+        plugin = controller.get_active_plugin() or controller.plugin_registry.get("chrome")
+
+    if not plugin:
+        return {"error": f"Plugin '{plugin_id}' not found.", "features": []}
+
+    features = [f.model_dump() for f in plugin.list_features()]
+    return {
+        "app_id": plugin.app_id,
+        "name": plugin.name,
+        "supported_panes": list(plugin.sub_panes.keys()),
+        "features": features,
+    }
+
+
+@mcp_server.tool()
+def invoke_plugin_feature(
+    feature_id: str,
+    plugin_id: Optional[str] = None,
+    args: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes a high-level application capability natively with closed-loop delta verification.
+    
+    Args:
+        feature_id: Identifier of the capability (e.g. 'browser.navigate', 'browser.new_tab', 'browser.reload').
+        plugin_id: Target plugin identifier. If omitted, routes to the active window's plugin.
+        args: Optional parameter dictionary (e.g. {'url': 'https://gemini.google.com'}).
+        
+    Returns:
+        Action outcome with success flag, visual delta, and status message.
+    """
+    plugin = None
+    if plugin_id:
+        plugin = controller.plugin_registry.get(plugin_id)
+    else:
+        plugin = controller.get_active_plugin() or controller.plugin_registry.get("chrome")
+
+    if not plugin:
+        return {
+            "success": False,
+            "feature_id": feature_id,
+            "message": f"Could not resolve an application plugin for feature '{feature_id}'.",
+        }
+
+    return plugin.execute_feature(feature_id=feature_id, controller=controller, args=args)
+
+
+@mcp_server.tool()
+def capture_pane(
+    pane_name: str,
+    window_id: Optional[str] = None,
+    title_filter: Optional[str] = None,
+    mode: str = "raw",
+) -> Dict[str, Any]:
+    """
+    Ultra-efficient sub-pane perception tool. Captures strictly a named functional
+    zone of the target or active window (e.g. 'address_bar', 'tab_strip', 'content_area').
+    Slashes multimodal token consumption by up to 90% compared to capturing a whole display.
+    
+    Args:
+        pane_name: Identifier of sub-pane ('address_bar', 'tab_strip', 'content_area', etc.).
+        window_id: Optional target window ID.
+        title_filter: Optional title substring filter (e.g. 'Chrome').
+        mode: Grounding mode ('raw', 'cursor_only', 'annotated_som').
+        
+    Returns:
+        ScreenshotResult dictionary with image_base64 and scaled dimensions.
+    """
+    result = controller.capture_pane(
+        pane_name=pane_name,
+        window_id=window_id,
+        title_filter=title_filter,
+        mode=mode,
+    )
+    return result.model_dump()
+
+
 def main():
     """Starts the FastMCP server in standard I/O mode."""
     mcp_server.run()

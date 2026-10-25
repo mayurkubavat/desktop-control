@@ -20,6 +20,8 @@ from vision_mcp.types import (
     BoundingBox,
 )
 from vision_mcp.config import CONFIG
+from vision_mcp.plugins.registry import PluginRegistry, PLUGIN_REGISTRY
+from vision_mcp.plugins.base import BaseUIAppPlugin
 
 
 class FeedbackLoopController:
@@ -37,6 +39,7 @@ class FeedbackLoopController:
         self.token_optimizer = TokenOptimizer()
         self.window_clipper = WindowClipper(hal)
         self.action_cache = ActionCache()
+        self.plugin_registry = PLUGIN_REGISTRY
 
         # Backward compatibility aliases
         self.atspi_inspector = self.grounding_engine._semantic.inspector
@@ -456,3 +459,44 @@ class FeedbackLoopController:
             time.sleep(0.35)
 
         return self.find_element(query=query)
+
+    def get_active_plugin(self) -> Optional[BaseUIAppPlugin]:
+        """Detects and returns the application plugin matching the active foreground window."""
+        try:
+            act_win = self.hal.get_active_window()
+            if act_win and act_win.title:
+                return self.plugin_registry.detect(act_win.title, act_win.app_name)
+        except Exception:
+            pass
+        return None
+
+    def capture_pane(
+        self,
+        pane_name: str,
+        window_id: Optional[str] = None,
+        title_filter: Optional[str] = None,
+        mode: str = "raw",
+    ) -> ScreenshotResult:
+        """
+        High-efficiency perception tool that captures strictly a named sub-pane of
+        the target or active application window (e.g. 'address_bar', 'content_area').
+        Slashes multimodal tokens by up to 90% compared to full-window captures.
+        """
+        target_win = self.window_clipper.resolve_target_window(window_id=window_id, title_filter=title_filter)
+        if not target_win:
+            target_win = self.hal.get_active_window()
+        if not target_win:
+            return self.capture_state(mode=mode)
+
+        plugin = self.plugin_registry.detect(target_win.title, target_win.app_name)
+        if not plugin:
+            plugin = self.plugin_registry.get("chrome")
+
+        pane_bbox = plugin.get_sub_pane(pane_name, target_win.bbox) if plugin else None
+        if not pane_bbox:
+            return self.capture_state(mode=mode, window_id=target_win.window_id)
+
+        screen_size = self.hal.get_screen_size()
+        clipped_region = self.window_clipper.clip_region_to_screen(pane_bbox, screen_size)
+        return self.capture_state(mode=mode, region=clipped_region)
+

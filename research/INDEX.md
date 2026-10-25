@@ -49,6 +49,9 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[vivado_tool_features_and_ai_automation|Vivado Tool Features & AI Automation Architecture]]
   * AMD/Xilinx Vivado (v2025.1) architecture, `xsim` flow, sub-panes, waveform hotkeys, and Tcl script automation.
   * Synchronous FIFO design specifications, waveform verification checklist, and hybrid Tcl/Vision operation.
+* [[next_gen_vision_mcp_gemini_research|Next-Gen Vision Control MCP Architecture: Deep-Dive Research with Gemini 4 Argon]]
+  * Multi-turn research dialogue with Gemini 4 Argon on Gemini Web exploring fundamental limits of reactive agents.
+  * Comprehensive blueprints for Event-Driven Quiescence (XDamage/XFixes), Skill Crystallization (Journal AST), Semantic Modal Triage, Local Neural vDOM Sidecar, and 5-Phase Roadmap.
 
 ---
 

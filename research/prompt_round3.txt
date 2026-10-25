@@ -1,0 +1,16 @@
+Yes, absolutely! Let's proceed to Round 3: The Local Neural Grounding Sidecar, Virtual DOM (vDOM) Schema, and End-to-End System Integration.
+
+Please provide the concrete blueprints, schemas, and production code for the remaining core pillars:
+
+### 1. P1: Local Neural Grounding Sidecar & Virtual DOM (vDOM)
+- **Local Model Runtime & Pipeline**: How the local daemon runs lightweight neural models (e.g., fine-tuned Florence-2 / OmniParser-v2 / YOLO-World + PaddleOCR) via ONNX Runtime / TensorRT on local GPU/NPU to produce element proposals in < 60ms without cloud token cost.
+- **The Unified Virtual DOM (vDOM) Schema**: The exact JSON / Pydantic schema for the hybrid tree that merges AT-SPI2 accessibility nodes with neural visual bounding boxes (handling coordinate translation, IoU deduplication, hierarchy nesting, and role inference for canvas-drawn elements).
+- **Zero-Token Query Engine**: How the MCP server queries this vDOM (`find_element`, `query_selector`, spatial relations like `below("Clock Summary")`) without sending full screenshots to the frontier LLM.
+
+### 2. P4: Dynamic Anchor-Relative Sub-Pane Resolution
+- **Anchor Specification & Layout Solver**: How sub-panes (e.g., `waveform_canvas`, `schematic_viewer`, `tcl_console`) are defined relative to persistent UI anchors (tab headers, sash dividers, status bar) rather than brittle absolute screen pixels.
+- **Auto-Correction on Window Resize/Docking Shifts**: How the engine dynamically recalculates bounding boxes in real-time when the application window resizes or docking panels shift.
+
+### 3. Master System Architecture & Implementation Roadmap
+- **Unified Architecture Diagram**: A complete ASCII/Mermaid architectural diagram showing how Tier 0 (Quiescence/XDamage), Tier 1 (Semantic D-Bus), Tier 2 (Neural vDOM Sidecar), Tier 3 (Frontier VLM), Skill Crystallizer (Journal AST), and Modal Triage interact.
+- **Consolidated Implementation Roadmap**: A prioritized, phased engineering checklist (Phases 1 through 5) for deploying Vision Control MCP 2.0 into production.

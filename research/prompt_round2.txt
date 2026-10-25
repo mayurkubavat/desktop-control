@@ -1,0 +1,22 @@
+This is an outstanding critique and roadmap. Your analysis of the 250ms settle-time fallacy, dense canvas CV breakdown, destructive modal auto-dismissal, and the 4-tier perception hierarchy directly hits our exact engineering bottlenecks.
+
+We want to dive deep into Round 2. Please provide the concrete architecture, state machine, schemas, and implementation blueprints for the following core systems:
+
+### 1. P2: GUI-to-Script Skill Crystallization Engine
+We want Vision MCP to learn and "crystallize" GUI workflows into zero-token, 100% deterministic scripts:
+- **Journal/Log Listener Architecture**: How to intercept and correlate X11 GUI actions with EDA journal streams (e.g., Vivado `vivado.jou` / `vivado.log`, Verdi `novas.cmd`, VS Code commands).
+- **Trajectory Compiler & AST Parameterizer**: How the engine parses raw echoed Tcl/CLI commands, abstracts hardcoded object IDs or coordinates into parameterized arguments (e.g., `$clk_pin`, `$fifo_depth`), and handles non-deterministic UI delays.
+- **Dynamic MCP Tool Registry**: The exact Python architecture for registering newly crystallized skills as first-class, typed MCP tools that future agent turns can call directly with 0 visual tokens.
+
+### 2. P0: Event-Driven Quiescence & Semantic Verification Engine
+Replacing `sleep(250ms) + Delta_ratio` with true OS and semantic signals:
+- **X11 / Linux Compositor Integration**: Provide the exact Python/C implementation for querying `XDamage` regions and `XFixes` cursor image state (distinguishing between `arrow`, `watch`/hourglass, `crosshair`, `resize`).
+- **Post-Condition Contract Schema**: Define the Pydantic schema for action post-conditions (`expect_state`, `expect_window`, `expect_subpane_delta`, `expect_text`).
+- **Adaptive Timeout & Quiescence State Machine**: How the controller transitions through `DISPATCHED -> DAMAGE_ACCUMULATION -> SETTLING -> QUIESCENT -> CONTRACT_VERIFIED -> FAILED`.
+
+### 3. P3: Semantic Modal Triage & Policy Router (`classify_obstruction`)
+Transforming `dismiss_obstructions` from a naive auto-clicker into an intelligent safety layer:
+- **Modal Risk Classification Taxonomy**: (BENIGN_DISMISSIBLE vs INFORMATIVE_ACK vs WORKFLOW_BRANCHING vs DESTRUCTIVE_CONFIRMATION).
+- **Decision Engine & Escalation Payload**: What data structure does the MCP return to the LLM orchestrator when encountering an ambiguous or critical dialog (e.g., license expiration, overwriting constraints, unsaved synthesis checkpoint)?
+
+Please provide detailed, production-grade schemas, state diagrams, and Python/Linux code snippets for each of these three systems.

@@ -52,6 +52,7 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
 * [[gemini_web_clipboard_extraction_recipe|Zero-Token Research Extraction: Gemini Web Copy Button Recipe]]
   * Harvesting multi-page markdown responses with zero visual tokens by clicking the response footer copy icon.
   * Desktop HAL and X11 clipboard integration pattern for on-the-go tool research.
+  * Multi-turn autonomous Q&A orchestration with Gemini 4 Argon via background xclip, xtest, and settled-state diffing.
 * [[visual_delta_verification|Visual Delta Verification Tuning]]
   * Settle time calibration (`settle_time_sec=0.25`).
   * Interpreting $\Delta_{ratio}$ to prevent action cascading.

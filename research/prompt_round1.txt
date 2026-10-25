@@ -1,0 +1,29 @@
+We are building an autonomous desktop AI agent infrastructure called "Vision Control MCP" (Model Context Protocol). We want your deep architectural critique, blindspot analysis, and technical suggestions for our next-generation roadmap.
+
+### 1. The Core Vision MCP Architecture Today:
+1. Closed-Loop Perception-Action-Verification Controller:
+   - Every physical action (mouse click, keyboard type, drag, scroll) computes a visual pixel delta (Delta_ratio) against a post-action screenshot after a calibrated settle time (250ms) to verify that the UI reacted before proceeding.
+2. Pluggable Grounding Engine (Hotswappable Providers):
+   - Ensemble Strategy (Default): Fuses semantic OS accessibility trees (AT-SPI2 / D-Bus on Linux, UIA on Windows) with pure Computer Vision (multi-scale Canny edge contours + MSER text region proposals) using Non-Maximum Suppression (IoU deduplication).
+   - Semantic Provider: Direct AT-SPI2 tree inspection for 100% ground-truth element names, roles, and bounding boxes.
+   - Pure CV Provider: Visual contour detection for non-accessible canvas apps, EDA tools, and legacy X11 utilities.
+   - Template Matcher: Normalized cross-correlation for specific UI icons.
+3. Token & Cost Optimization (Zero-Token & Sub-Pane Perception):
+   - Zero-Token Search (find_element & find_and_click): Resolves element coordinates by text/role without sending full 4K screenshots to multimodal LLM context.
+   - Self-Healing Action Cache: Caches successful click coordinates per application. Replays instantly (0 visual tokens); self-heals via visual grounding if layout shifts or delta fails.
+   - Per-Window Perception (capture_window): Slashes image tokens by 50-80% by clipping strictly to the active window bounds.
+   - Sub-Pane Perception (capture_pane): Clips strictly to functional ROIs (e.g., waveform_canvas, tcl_console, address_bar), cutting image tokens by over 80-90%.
+4. Autonomous Defense (dismiss_obstructions):
+   - Intercepts and auto-dismisses blocking modal dialogs, cookie banners, and permission popups.
+5. High-Feature Application Plugin Framework:
+   - Declarative feature catalogs, sub-pane bounding box definitions, and hybrid CLI/Tcl scripting hooks for complex 100+ feature professional desktop applications (built Chrome and Vivado 2025.1 EDA plugins).
+
+### 2. The Final Goal:
+A general-purpose, fully autonomous, token-efficient multimodal desktop agent capable of operating complex 100+ feature professional desktop applications (EDA suites like Synopsys Verdi and AMD Vivado, CAD tools, IDEs, and browsers) with 100% task completion accuracy, continuous learning, and minimal token cost.
+
+### 3. Your Task (Round 1: Architecture Critique & Frontier Improvements):
+Analyze this architecture and provide:
+1. Architectural Critique & Blindspots: Where will this architecture fail or hit scalability bottlenecks when handling long-horizon (100+ steps) workflows across complex professional apps?
+2. Next-Generation Perception Paradigms: How should we evolve beyond static screenshot captures? (e.g. semantic DOM/widget tree diffing, temporal action models, lightweight local vision sidecars vs frontier LLMs).
+3. State Tracking & Hierarchical Planning: How should the orchestrator maintain a belief state across multi-window cascades, floating dialogs, and asynchronous long-running background compilations?
+4. Concrete Improvement Recommendations: Prioritize top 5 high-impact features or architectural refactors we should build next into Vision MCP.

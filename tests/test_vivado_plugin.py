@@ -71,6 +71,7 @@ def test_vivado_feature_catalog():
         "vivado.add_wave",
         "vivado.set_radix",
         "vivado.tcl_exec",
+        "vivado.toggle_flow_navigator",
     ]
     for feat_id in expected_features:
         feat = plugin.get_feature(feat_id)
@@ -136,6 +137,11 @@ def test_vivado_plugin_execution_mocked():
     res = plugin.execute_feature("vivado.set_radix", controller, {"radix": "hex"})
     assert res["success"] is True
     mock_hal.keyboard_type.assert_called_with("set_property radix hex [get_waves *]")
+
+    # 9. Toggle Flow Navigator
+    res = plugin.execute_feature("vivado.toggle_flow_navigator", controller)
+    assert res["success"] is True
+    mock_hal.keyboard_hotkey.assert_called_with(["ctrl", "q"])
 
 
 def test_registry_includes_vivado():

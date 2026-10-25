@@ -172,6 +172,14 @@ class VivadoPlugin(BaseUIAppPlugin):
                     "command": {"type": "string", "required": True, "description": "Tcl command to execute"},
                 },
             ),
+            "vivado.toggle_flow_navigator": FeatureDescriptor(
+                feature_id="vivado.toggle_flow_navigator",
+                name="Toggle Flow Navigator",
+                description="Toggles or collapses the left Flow Navigator panel to reclaim horizontal workspace for waveforms",
+                category="view",
+                hotkey="ctrl+q",
+                target_pane="flow_navigator",
+            ),
         }
 
     def detect(self, window_title: str, app_name: Optional[str] = None) -> bool:
@@ -346,6 +354,22 @@ class VivadoPlugin(BaseUIAppPlugin):
         # 10. Launch Simulation
         if feature_id == "vivado.launch_simulation":
             return self.execute_feature("vivado.tcl_exec", controller, {"command": "launch_simulation"})
+
+        # 11. Toggle Flow Navigator
+        if feature_id == "vivado.toggle_flow_navigator":
+            _send_hotkey(hal, "ctrl+q")
+            res = controller.execute_with_verification(
+                action_name="vivado.toggle_flow_navigator",
+                action_func=lambda: None,
+                settle_time_sec=0.3,
+            )
+            return {
+                "success": res.success,
+                "feature_id": feature_id,
+                "delta_detected": res.delta_detected,
+                "change_ratio": res.change_ratio,
+                "message": "Flow Navigator toggled (Ctrl+Q).",
+            }
 
         return {
             "success": False,

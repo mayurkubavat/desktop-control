@@ -40,6 +40,10 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
   * Operational runbook for automating Vivado 2025.1 GUI on Linux.
   * SystemVerilog FIFO simulation, tab switching, and waveform toolbar zoom-fit mechanics.
   * High-efficiency sub-pane ROI perception slashing token consumption by 82.4%.
+* [[vivado_ui_layout_customization_for_dv|Vivado UI Layout Customization for DV Engineers: dv-view Setup & Persistence]]
+  * Visual exploration and spatial reorganization of Vivado GUI for verification engineers.
+  * Collapsing Flow Navigator, docking Call Stacks, Stack Frames, Locals, Objects, and Scope.
+  * Saving and persisting `dv-view` to `~/.Xilinx/Vivado/2025.1/data/layouts/dv-view.layout`.
 
 ### 3. Agentic Performance & Token Optimization
 * [[zero_token_element_discovery|Zero-Token Element Discovery & Compound Actions]]

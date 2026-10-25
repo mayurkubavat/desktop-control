@@ -45,3 +45,4 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 
 ## 🔗 Related Knowledge Repositories
 * [[../learnings/INDEX|Practical Learnings & Execution Recipes]] — Real-world heuristics, window management discoveries, and operational debugging tips.
+* [[../references/README|Reference MCP Codebases & Analysis]] — Upstream architectural breakdowns and source code for Microsoft Playwright MCP and Chrome DevTools MCP.

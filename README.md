@@ -91,16 +91,19 @@ flowchart TB
 
 ---
 
-## 3. Tool Catalog (20 MCP Tools)
+## 3. Tool Catalog (23 MCP Tools)
 
 | Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `take_screenshot` | `mode`, `app_filter`, `region`, `strategy_override` | Captures screen with optional Set-of-Marks badge overlays and virtual cursor. |
+| `take_screenshot` | `mode`, `app_filter`, `region`, `window_id`, `clip_to_active_window`, `strategy_override` | Captures screen with optional Set-of-Marks and window clipping. |
+| `capture_window` | `window_id`, `title_filter`, `mode` | **Window-Clipping Perception:** Clips strictly to active or target window (60-80% token reduction). |
+| `dismiss_obstructions`| `max_attempts` | **Autonomous Defense:** Auto-dismisses modal popups, cookie banners, and permission requests. |
+| `manage_cache` | `action`, `app_key`, `query` | Manages Self-Healing Action Cache (`stats`, `invalidate`, `clear`). |
 | `get_accessibility_tree` | `app_name_filter`, `max_depth`, `filter_interactable` | Queries AT-SPI2 for semantic widget hierarchy, roles, and screen bounding boxes. |
 | `find_element` | `query`, `role`, `fuzzy`, `strategy` | **Zero-Token Search:** Resolves element physical coordinates by label/role without image tokens. |
 | `click` | `mark_id`, `x`, `y`, `query`, `button`, `click_count`, `verify_delta` | Clicks either a mark badge, query match, or coordinates with automated verification. |
 | `click_and_type` | `text`, `query`, `mark_id`, `x`, `y`, `clear_first`, `press_enter`, `delay_ms` | **Compound Action:** Focuses target, clears content, types text, and presses Enter. |
-| `find_and_click` | `query`, `button`, `click_count`, `verify_delta` | Autonomous one-shot find-by-text and click with verified visual delta. |
+| `find_and_click` | `query`, `button`, `click_count`, `verify_delta` | Autonomous one-shot find-by-text and click with verified visual delta and cached replay. |
 | `move_cursor` | `x`, `y` | Moves pointer to absolute desktop coordinates without clicking. |
 | `drag_and_drop` | `start_x`, `start_y`, `end_x`, `end_y`, `duration_sec`, `verify_delta` | Performs smooth mouse drag from start coordinates to end coordinates. |
 | `scroll` | `direction` (`up`/`down`/`left`/`right`), `amount`, `verify_delta` | Emulates mouse wheel scrolling at current cursor position. |
@@ -111,7 +114,7 @@ flowchart TB
 | `list_windows` | None | Lists open windows with window IDs, titles, bounding boxes, and active focus. |
 | `get_active_window` | None | Returns metadata for the currently focused desktop window. |
 | `focus_window` | `window_id` | Brings requested window to the foreground and grants input focus. |
-| `configure_vision` | `setting`, `value` | Dynamically hotswaps runtime settings (`grounding_strategy`, image dimensions, etc.). |
+| `configure_vision` | `setting`, `value` | Dynamically hotswaps runtime settings (`grounding_strategy`, cache toggles, etc.). |
 | `get_vision_diagnostics`| None | Reports system health, display server, screen bounds, and active grounding engine. |
 | `run_terminal_command`| `command`, `timeout_seconds` | Runs headless shell command for hybrid CLI + GUI navigation. |
 | `wait_for_ui_change` | `timeout_seconds`, `poll_interval_sec`, `min_delta_ratio` | Blocks until visual change is detected (e.g. waiting for page load). |
@@ -125,4 +128,14 @@ cd /home/mk/DV/git/Vision
 .venv/bin/pytest -v
 ```
 
-All 21 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, and compound tools.
+All 26 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, compound tools, Per-Window Perception, Self-Healing Action Cache, and Obstruction Interception.
+
+---
+
+## 5. Research Library & Upstream Code References
+
+* **Obsidian-Style Research Library (`research/`)**: Master index at `research/INDEX.md` covering multimodal grounding comparisons (OmniParser, UI-TARS, Browser-Use, Stagehand), token dynamics, and future UI plugin architectures.
+* **Operational Learnings Runbook (`learnings/`)**: Master index at `learnings/INDEX.md` detailing X11 window management fixes, zero-token element discovery patterns, browser recipes, and visual delta calibration.
+* **Upstream Reference MCP Implementations (`references/`)**: Master guide at `references/README.md` containing full source code and deep architectural analyses of:
+  * **Microsoft Playwright MCP (`references/playwright-mcp/`)**: Accessibility snapshots, locator generation, verification primitives, and trace capture.
+  * **Google Chrome DevTools MCP (`references/chrome-devtools-mcp/`)**: Puppeteer CDP bridges, `SlimMcpResponse`, token-optimized semantic summaries, memory/trace profiling, and WebMCP/3P tool extensions.

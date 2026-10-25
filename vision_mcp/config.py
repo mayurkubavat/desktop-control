@@ -24,6 +24,22 @@ class VisionConfig(BaseModel):
         default="standard",
         description="Token optimization mode: 'standard', 'delta_patch', 'thumbnail_roi'.",
     )
+    clip_to_active_window: bool = Field(
+        default=False,
+        description="Whether to automatically crop screenshots to the currently active window bounds.",
+    )
+
+    # Self-Healing Action Cache
+    enable_action_cache: bool = Field(
+        default=True,
+        description="Whether to use the self-healing locator cache for zero-token repeat actions.",
+    )
+
+    # Autonomous Obstruction Interception
+    auto_dismiss_obstructions: bool = Field(
+        default=True,
+        description="Whether to automatically detect and dismiss blocking modal dialogs/permission prompts.",
+    )
 
     # Set-of-Marks (SoM) & Grounding Strategy
     grounding_strategy: str = Field(

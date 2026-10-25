@@ -44,3 +44,4 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
 
 ## 🔗 Related Knowledge Repositories
 * [[../research/INDEX|Theoretical & Architectural Research Library]] — End-to-end system architectures, grounding models, and comparative benchmark evaluations.
+* [[../references/README|Reference MCP Codebases & Analysis]] — Upstream architectural breakdowns and source code for Microsoft Playwright MCP and Chrome DevTools MCP.

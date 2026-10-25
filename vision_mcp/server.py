@@ -31,10 +31,12 @@ def take_screenshot(
     mode: str = "annotated_som",
     app_filter: Optional[str] = None,
     region: Optional[List[int]] = None,
+    window_id: Optional[str] = None,
+    clip_to_active_window: bool = False,
     strategy_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Captures the desktop screen with visual perception and grounding.
+    Captures the desktop screen with visual perception, Set-of-Marks, and optional per-window clipping.
 
     Args:
         mode: Grounding mode:
@@ -44,26 +46,90 @@ def take_screenshot(
               - 'raw': Clean desktop screenshot without annotations.
         app_filter: Optional application title or process filter for AT-SPI introspection.
         region: Optional [x, y, width, height] bounding box. If None, captures primary screen.
+        window_id: Optional window identifier to clip perception strictly to window bounds (60-80% token reduction).
+        clip_to_active_window: If True, automatically clips capture to currently focused window bounds.
         strategy_override: Optional strategy hotswap: 'ensemble', 'semantic', 'cv', or 'template'.
 
     Returns:
-        Dictionary containing:
-        - image_base64: Base64 JPEG string of the captured screen.
-        - mime_type: "image/jpeg"
-        - width, height: Dimensions of the returned image.
-        - original_width, original_height: Physical desktop display resolution.
-        - scale_factor: Ratio applied to optimize token usage (e.g. 0.53).
-        - marks: List of tagged UI elements with their mark IDs, roles, names, and coordinates.
-        - cursor_position: Current pointer coordinates [x, y].
+        Dictionary containing image_base64, marks, resolution, and scale factor.
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
     result = controller.capture_state(
         mode=mode,
         app_filter=app_filter,
         region=reg_tuple,
+        window_id=window_id,
+        clip_to_active_window=clip_to_active_window,
         strategy_override=strategy_override,
     )
     return result.model_dump()
+
+
+@mcp_server.tool()
+def capture_window(
+    window_id: Optional[str] = None,
+    title_filter: Optional[str] = None,
+    mode: str = "annotated_som",
+) -> Dict[str, Any]:
+    """
+    High-efficiency perception tool that captures strictly the target or active window.
+    Slashes multimodal token consumption by 60-80% compared to capturing a full 4K display.
+
+    Args:
+        window_id: Hex or integer window identifier. If None, uses title_filter or active window.
+        title_filter: Substring to match window title (e.g. 'Chrome', 'Terminal', 'Verdi').
+        mode: 'annotated_som', 'annotated_cv', or 'raw'.
+    """
+    target_win = controller.window_clipper.resolve_target_window(window_id=window_id, title_filter=title_filter)
+    win_id = target_win.window_id if target_win else None
+    result = controller.capture_state(
+        mode=mode,
+        window_id=win_id,
+        clip_to_active_window=(target_win is None),
+    )
+    return result.model_dump()
+
+
+@mcp_server.tool()
+def dismiss_obstructions(
+    max_attempts: int = 2,
+) -> Dict[str, Any]:
+    """
+    Autonomous defense: Detects and automatically dismisses blocking modal popups,
+    cookie banners, and browser permission requests ('Show notifications', 'Allow microphone').
+
+    Args:
+        max_attempts: Number of dismissal iterations.
+    """
+    return controller.obstruction_interceptor.dismiss_if_present(max_attempts=max_attempts)
+
+
+@mcp_server.tool()
+def manage_cache(
+    action: str = "stats",
+    app_key: Optional[str] = None,
+    query: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Manages the Self-Healing Action & Locator Cache.
+
+    Args:
+        action: 'stats' (view telemetry), 'invalidate' (clear specific entry), or 'clear' (empty cache).
+        app_key: Application identifier (used for invalidate).
+        query: Query string (used for invalidate).
+    """
+    act = action.strip().lower()
+    if act == "stats":
+        return controller.action_cache.get_stats()
+    elif act == "clear":
+        controller.action_cache.clear()
+        return {"success": True, "message": "Locator cache cleared."}
+    elif act == "invalidate":
+        if not app_key or not query:
+            return {"success": False, "error": "Must provide 'app_key' and 'query' to invalidate."}
+        ok = controller.action_cache.invalidate(app_key=app_key, query=query)
+        return {"success": ok, "message": f"Entry for '{app_key}::{query}' invalidated."}
+    return {"success": False, "error": f"Unknown action: '{action}'"}
 
 
 @mcp_server.tool()

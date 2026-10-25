@@ -57,14 +57,14 @@ class ATSPIInspector:
     def inspect_desktop(
         self,
         app_name_filter: Optional[str] = None,
-        max_depth: int = 6,
+        max_depth: int = 16,
         filter_interactable: bool = True,
     ) -> List[UIElement]:
         """
         Traverses the AT-SPI desktop hierarchy and returns flattened list of UI elements.
 
         Args:
-            app_name_filter: Optional substring to filter matching application names.
+            app_name_filter: Optional substring to filter matching application names or window titles.
             max_depth: Maximum recursion depth.
             filter_interactable: If True, only returns clickable or typable elements.
 
@@ -75,7 +75,6 @@ class ATSPIInspector:
             return []
 
         elements: List[UIElement] = []
-        element_id = 1
 
         try:
             desktop = self._atspi.get_desktop(0)
@@ -87,18 +86,56 @@ class ATSPIInspector:
                     continue
 
                 app_name = app.get_name() or ""
-                if app_name_filter and app_name_filter.lower() not in app_name.lower():
+                
+                # Check if app matches filter or has matching window
+                matched = True
+                if app_name_filter:
+                    matched = app_name_filter.lower() in app_name.lower()
+                    if not matched:
+                        # Check window titles
+                        for w_idx in range(app.get_child_count()):
+                            w_child = app.get_child_at_index(w_idx)
+                            if w_child and app_name_filter.lower() in (w_child.get_name() or "").lower():
+                                matched = True
+                                break
+
+                if not matched:
                     continue
 
-                self._traverse_node(
-                    node=app,
-                    depth=1,
-                    max_depth=max_depth,
-                    filter_interactable=filter_interactable,
-                    elements=elements,
-                    start_id=element_id,
-                )
-                element_id = len(elements) + 1
+                # Traverse top-level frames/windows
+                for w_idx in range(app.get_child_count()):
+                    win_node = app.get_child_at_index(w_idx)
+                    if not win_node:
+                        continue
+
+                    # Obtain window screen extents for offset fallback
+                    win_x, win_y = 0, 0
+                    win_comp = win_node.get_component_iface()
+                    if win_comp:
+                        w_ext = win_comp.get_extents(self._coord_type)
+                        win_x, win_y = w_ext.x, w_ext.y
+
+                    # If AT-SPI reports window top-level at 0,0, cross-reference X11 window position
+                    if win_x == 0 and win_y == 0:
+                        try:
+                            from vision_mcp.hal.factory import get_desktop_hal
+                            hal_wins = get_desktop_hal().list_windows()
+                            w_title = (win_node.get_name() or "").lower()
+                            for hw in hal_wins:
+                                if w_title and (w_title in hw.title.lower() or hw.title.lower() in w_title):
+                                    win_x, win_y = hw.bbox.x, hw.bbox.y
+                                    break
+                        except Exception:
+                            pass
+
+                    self._traverse_node(
+                        node=win_node,
+                        depth=1,
+                        max_depth=max_depth,
+                        filter_interactable=filter_interactable,
+                        elements=elements,
+                        win_offset=(win_x, win_y),
+                    )
 
                 if len(elements) >= CONFIG.som_max_elements:
                     break
@@ -115,7 +152,7 @@ class ATSPIInspector:
         max_depth: int,
         filter_interactable: bool,
         elements: List[UIElement],
-        start_id: int,
+        win_offset: tuple[int, int] = (0, 0),
     ) -> None:
         if depth > max_depth or len(elements) >= CONFIG.som_max_elements:
             return
@@ -131,6 +168,12 @@ class ATSPIInspector:
                 rect = comp.get_extents(self._coord_type)
                 w, h = rect.width, rect.height
                 x, y = rect.x, rect.y
+
+                # If screen coordinates are 0,0 and we have a window offset, try WINDOW coordinates
+                if x == 0 and y == 0 and (win_offset[0] != 0 or win_offset[1] != 0):
+                    w_rect = comp.get_extents(self._atspi.CoordType.WINDOW)
+                    x = win_offset[0] + w_rect.x
+                    y = win_offset[1] + w_rect.y
 
                 # Check validity of geometry
                 area = w * h
@@ -157,7 +200,7 @@ class ATSPIInspector:
                         max_depth=max_depth,
                         filter_interactable=filter_interactable,
                         elements=elements,
-                        start_id=start_id,
+                        win_offset=win_offset,
                     )
         except Exception:
             return

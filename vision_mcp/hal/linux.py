@@ -202,7 +202,7 @@ class LinuxHAL(IDesktopHAL):
                     geom = win.get_geometry()
                     
                     # Convert window coordinates to root coordinates
-                    coords = win.translate_coords(root, 0, 0)
+                    coords = root.translate_coords(win, 0, 0)
 
                     bbox = BoundingBox(
                         x=coords.x,

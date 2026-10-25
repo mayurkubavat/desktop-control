@@ -64,7 +64,7 @@ def take_screenshot(
 @mcp_server.tool()
 def get_accessibility_tree(
     app_name_filter: Optional[str] = None,
-    max_depth: int = 5,
+    max_depth: int = 16,
     filter_interactable: bool = True,
 ) -> List[Dict[str, Any]]:
     """

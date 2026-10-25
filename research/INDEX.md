@@ -52,6 +52,11 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[next_gen_vision_mcp_gemini_research|Next-Gen Vision Control MCP Architecture: Deep-Dive Research with Gemini 4 Argon]]
   * Multi-turn research dialogue with Gemini 4 Argon on Gemini Web exploring fundamental limits of reactive agents.
   * Comprehensive blueprints for Event-Driven Quiescence (XDamage/XFixes), Skill Crystallization (Journal AST), Semantic Modal Triage, Local Neural vDOM Sidecar, and 5-Phase Roadmap.
+* [[argon_round4_gemma3_sidecar|Round 4 Architecture: Local Neural Sidecar & Gemma 3 Multimodal Edge Plugin]]
+  * Dual-lane edge architecture: Fast-Path (<30ms YOLOv11s-UI + PP-OCRv4 via TensorRT) vs Slow-Path Cognitive VLM (Gemma 3 4B-IT via llama-server).
+  * Why Gemma 3 1B is text-only while 4B-IT provides 256-token SigLIP multimodal vision at ~3.4 GB VRAM footprint.
+  * Sub-millisecond BMP shared memory slicing (`/dev/shm`), 64-bit dHash perceptual caching (<0.2ms hits), and GBNF grammar-constrained JSON output.
+  * Practical DV case studies: Synopsys Verdi/Vivado waveform X-propagation detection, locked IP hierarchy icons, and schematic DRC pin grounding.
 * [[../learnings/vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
   * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
   * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).

@@ -107,7 +107,7 @@ class SubPaneROI(BaseModel):
         if self.fixed_width is not None:
             w = min(self.fixed_width, max(1, window_bbox.width - (x - window_bbox.x)))
         else:
-            w = int(window_bbox.width * self.relative_width)
+            w = int(window_bbox.width * self.relative_width) - self.offset_x
 
         if self.fixed_height is not None:
             h = min(self.fixed_height, max(1, window_bbox.height - (y - window_bbox.y)))

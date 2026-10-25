@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional, Any
 from vision_mcp.plugins.base import BaseUIAppPlugin
 from vision_mcp.plugins.chrome import ChromeBrowserPlugin
+from vision_mcp.plugins.vivado import VivadoPlugin
 from vision_mcp.types import PluginSummary
 
 
@@ -19,6 +20,7 @@ class PluginRegistry:
     def _register_default_plugins(self) -> None:
         """Registers standard out-of-the-box application plugins."""
         self.register(ChromeBrowserPlugin())
+        self.register(VivadoPlugin())
 
     def register(self, plugin: BaseUIAppPlugin) -> None:
         """Registers a new application plugin."""

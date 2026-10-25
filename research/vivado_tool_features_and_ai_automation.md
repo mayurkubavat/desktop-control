@@ -1,0 +1,159 @@
+---
+title: Vivado Tool Features & AI Automation Architecture
+tags:
+  - eda
+  - vivado
+  - xsim
+  - waveform
+  - ai-vision
+  - desktop-automation
+  - tcl-integration
+created: 2026-10-25
+model: Gemini 4 Argon
+type: research
+status: completed
+references:
+  - "[[INDEX]]"
+  - "[[gemini_web_clipboard_extraction_recipe]]"
+  - "[[phase2_application_plugin_framework]]"
+---
+
+# Vivado Tool Features & AI Automation Architecture
+
+## Executive Summary
+Automating AMD/Xilinx Vivado (v2025.1) through an autonomous AI agent requires a **hybrid deterministic-perceptual architecture**: combining native **Tcl scripting / Tcl console execution** for synthesis, compilation, and simulation control with **computer vision and window pane cropping** for waveform verification, timing inspection, and GUI state validation.
+
+---
+
+## 1. UI Sub-Panes & Spatial Layout
+
+Vivado 2025.1 features a dockable multi-pane Qt/Java workspace. An AI vision agent perceives the interface divided into four primary functional sub-panes:
+
+```
++-----------------------------------------------------------------------------------------+
+| Vivado Menu & Main Toolbar (Window Header)                                              |
++-------------------+---------------------------------------------------------------------+
+| Flow Navigator    | Workspace Area (Tabbed)                                             |
+|                   |  - Project Summary / Text Editor / Schematics                       |
+| - Project Manager |  - Waveform Viewer (`Untitled 1*`)                                   |
+| - IP Integrator   |    * Signal Names & Hierarchy Column                                |
+| - Simulation      |    * Waveform Canvas (Time Ruler & Transitions)                     |
+| - Synthesis       |                                                                     |
+| - Implementation  +---------------------------------------------------------------------+
+| - Bitstream       | Scope & Objects / Secondary Dock                                    |
++-------------------+---------------------------------------------------------------------+
+| Tcl Console & Log Dock (Bottom Panel)                                                   |
+| [Tcl Console] [Messages] [Log] [Reports]                                                |
+| > Type a Tcl command here...                                                            |
++-----------------------------------------------------------------------------------------+
+```
+
+| UI Sub-Pane | Typical Relative ROI | Primary Function | Agent Interaction Strategy |
+| :--- | :--- | :--- | :--- |
+| **Flow Navigator** | Left column (`x: 0% - 14%`, `y: 5% - 95%`) | High-level workflow triggers (Project Manager, Simulation, Synthesis). | Prefer Tcl equivalents (`launch_simulation`); use visually to confirm active workflow state. |
+| **Workspace (Waveform Canvas)** | Center-Right (`x: 15% - 98%`, `y: 5% - 75%`) | Hosts the Waveform Viewer, Signal tree, and Time axis. | Primary visual perception target for AI agents. Focus canvas before sending hotkeys like `F` (Zoom Fit). |
+| **Scope & Objects** | Mid-Left sub-dock | Design hierarchy tree (`tb` $\rightarrow$ `dut`) and individual wire/reg signals. | Navigate via Tcl (`current_scope`, `get_objects`) rather than fragile nested tree clicks. |
+| **Tcl Console** | Bottom dock (`x: 15% - 98%`, `y: 75% - 98%`) | Interactive Tcl REPL and execution engine. | **Deterministic Control Anchor.** Clicking or sending commands here drives Vivado deterministically. |
+
+---
+
+## 2. Integrated Simulation Flow (`xsim`)
+
+Vivado’s integrated simulator operates in three phases:
+1. **Analysis (`xvlog` / `xvhdl`):** Parses syntax and checks module declarations.
+2. **Elaboration (`xelab`):** Builds simulation snapshot and resolves hierarchical port bindings.
+3. **Simulation (`xsim`):** Executes behavioral code, evaluates events, and renders waveform traces.
+
+### Execution Paths
+- **Visual Path:** Flow Navigator $\rightarrow$ SIMULATION $\rightarrow$ Run Simulation $\rightarrow$ Run Behavioral Simulation.
+- **Tcl Path:** `launch_simulation` directly in Tcl console or batch script.
+- **Modal Handling:** `launch_simulation` displays a floating progress dialog (`Launching simulation...`). The agent must synchronize and wait until the modal dismisses and the Waveform window becomes active.
+
+---
+
+## 3. Waveform Viewer Navigation & Hotkeys
+
+| Hotkey / Action | Action Name | Description | Agent Requirement |
+| :--- | :--- | :--- | :--- |
+| **`F`** | **Zoom Fit** | Scales time axis so the full simulated time fits viewport. | **Waveform canvas must have active focus** (click inside black signal area first). |
+| **`F5`** | **Run All** | Resumes simulation until `$finish` or `$stop`. | None. |
+| **`Shift+F2`** | **Run For** | Steps forward by default increment (e.g. `10us` or `500ns`). | None. |
+| **`Ctrl+Shift+F5`** | **Restart** | Resets simulation time to `0 ns` while preserving wave setup. | Ideal when adding new internal signals. |
+| **`Ctrl+W`** | **Add to Wave** | Adds selected signals from Objects pane to waveform window. | In Tcl, `add_wave /path/to/signal` is preferred. |
+| **`Ctrl++` / `Ctrl+-`** | **Zoom In/Out** | Zooms time axis in or out centered on cursor. | Can also click Zoom In / Zoom Out toolbar icons. |
+
+---
+
+## 4. Deterministic Tcl Automation Commands
+
+An AI agent achieves 100% execution reliability by issuing Tcl commands directly:
+
+```tcl
+# 1. Project Creation
+create_project -force fifo_sim ./vivado_prj -part xc7a35tcpg236-1
+
+# 2. Source Addition
+add_files -norecurse ./sync_fifo.sv
+add_files -fileset sim_1 -norecurse ./tb_sync_fifo.sv
+
+# 3. Top-Level Specification
+set_property top sync_fifo [current_fileset]
+set_property top tb_sync_fifo [get_filesets sim_1]
+update_compile_order -fileset sources_1
+update_compile_order -fileset sim_1
+
+# 4. Simulation Launch & Waveform Setup
+launch_simulation
+add_wave /tb_sync_fifo/u_fifo/*
+set_property radix hex [get_waves *]
+restart
+run 500ns
+
+# 5. Non-Visual State Verification
+set full_val [get_value /tb_sync_fifo/full]
+set dout_val [get_value -radix hex /tb_sync_fifo/dout]
+puts "STATUS: full=$full_val dout=$dout_val"
+```
+
+---
+
+## 5. SystemVerilog Synchronous FIFO Verification Specs
+
+### RTL Architecture (`sync_fifo.sv`)
+- **Parameters:** `DATA_WIDTH=8`, `DEPTH=4` (or 16).
+- **Control Interface:** `clk`, `rst_n`, `wr_en`, `rd_en`.
+- **Data Interface:** `din[7:0]`, `dout[7:0]`.
+- **Status Flags:** `full`, `empty`, `count[$clog2(DEPTH):0]`.
+- **Read Latency:** 1 clock cycle (registered read output `dout`).
+
+### Waveform Visual Checklist for AI Agent
+1. **Reset Phase (`0 ns - 25 ns`):** `rst_n == 0`, `empty == 1`, `full == 0`, `count == 0`.
+2. **First Write (`35 ns`):** `wr_en == 1`, `din == 8'h11`. On clock edge, `empty` drops to `0` and `count` increments to `1`.
+3. **FIFO Full Transition:** After `DEPTH` consecutive writes, `full` asserts (`1`), `count == DEPTH`.
+4. **FIFO Read & Latency:** When `rd_en` asserts, `dout` updates on the subsequent clock edge with valid data, and `count` decrements.
+5. **FIFO Empty Transition:** When all words are read, `empty` re-asserts (`1`).
+
+---
+
+## 6. Vision MCP Plugin Integration Strategy
+
+The Vision MCP `VivadoPlugin` will provide:
+1. Sub-pane definitions for:
+   - `flow_navigator`
+   - `workspace` / `waveform_canvas`
+   - `scope_objects`
+   - `tcl_console`
+2. Macro features:
+   - `vivado.launch_simulation`: Triggers simulation compilation and waits for wave window.
+   - `vivado.zoom_fit`: Clicks waveform canvas and sends `F`.
+   - `vivado.run_all`: Dispatches `F5`.
+   - `vivado.restart`: Dispatches `Ctrl+Shift+F5`.
+   - `vivado.tcl_eval`: Submits raw Tcl commands to Vivado console or CLI.
+   - `vivado.capture_waveform`: Crops and verifies wave canvas ROI.
+
+---
+
+## Cross References
+- [[INDEX|Research Index]]
+- [[gemini_web_clipboard_extraction_recipe|Gemini Web Clipboard Extraction Recipe]]
+- [[phase2_application_plugin_framework|Phase 2 Plugin Framework]]

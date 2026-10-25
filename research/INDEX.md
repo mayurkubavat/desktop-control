@@ -46,6 +46,9 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
 * [[verdi_tool_features_and_ai_automation|Synopsys Verdi Features & AI Automation Blueprint]]
   * Deep-dive into KDB, FSDB, nTrace, nWave, nSchema, Temporal Flow View, and Transaction debug.
   * Tactical recommendations for AI vision agents automating 100+ feature dense EDA interfaces.
+* [[vivado_tool_features_and_ai_automation|Vivado Tool Features & AI Automation Architecture]]
+  * AMD/Xilinx Vivado (v2025.1) architecture, `xsim` flow, sub-panes, waveform hotkeys, and Tcl script automation.
+  * Synchronous FIFO design specifications, waveform verification checklist, and hybrid Tcl/Vision operation.
 
 ---
 

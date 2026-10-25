@@ -36,11 +36,18 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
   * Restoring focus via bottom panel taskbar clicks when terminal commands steal X11 focus.
   * Streaming generation heuristics and multi-page content scrolling.
   * Visual ergonomics, hotkey dispatching, and value column reading for EDA tools (Verdi).
+* [[vivado_gui_waveform_automation|AMD/Xilinx Vivado GUI Waveform Automation & Sub-Pane Perception]]
+  * Operational runbook for automating Vivado 2025.1 GUI on Linux.
+  * SystemVerilog FIFO simulation, tab switching, and waveform toolbar zoom-fit mechanics.
+  * High-efficiency sub-pane ROI perception slashing token consumption by 82.4%.
 
 ### 3. Agentic Performance & Token Optimization
 * [[zero_token_element_discovery|Zero-Token Element Discovery & Compound Actions]]
   * When to use `find_element` and `find_and_click` before taking full screenshots.
   * Using `click_and_type` to combine 4 actions into a single atomic step.
+* [[gemini_web_clipboard_extraction_recipe|Zero-Token Research Extraction: Gemini Web Copy Button Recipe]]
+  * Harvesting multi-page markdown responses with zero visual tokens by clicking the response footer copy icon.
+  * Desktop HAL and X11 clipboard integration pattern for on-the-go tool research.
 * [[visual_delta_verification|Visual Delta Verification Tuning]]
   * Settle time calibration (`settle_time_sec=0.25`).
   * Interpreting $\Delta_{ratio}$ to prevent action cascading.

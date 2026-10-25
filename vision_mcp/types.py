@@ -49,6 +49,51 @@ class PostConditionContract(BaseModel):
     allow_async_promotion: bool = Field(default=True, description="Whether to promote long-running actions to async jobs")
 
 
+class ModalRiskTier(str, Enum):
+    """Risk tiers for modal dialog classification and triage."""
+    BENIGN_DISMISSIBLE = "BENIGN_DISMISSIBLE"
+    INFORMATIVE_ACK = "INFORMATIVE_ACK"
+    WORKFLOW_BRANCHING = "WORKFLOW_BRANCHING"
+    DESTRUCTIVE_OR_SYSTEM = "DESTRUCTIVE_OR_SYSTEM"
+
+
+class ModalButtonOption(BaseModel):
+    """Button option discovered inside a modal dialog."""
+    button_id: str = Field(description="Unique button identifier (e.g. 'btn_0', 'btn_ok')")
+    label: str = Field(description="Button display label text")
+    bbox: BoundingBox = Field(description="Physical pixel bounding box")
+    is_default_focused: bool = Field(default=False, description="Whether button is the default focused option")
+    inferred_consequence: str = Field(
+        default="State mutation",
+        description="Heuristic inference: 'Safe dismissal', 'Workflow branching decision', 'Destructive mutation'",
+    )
+
+
+class ModalEscalationPayload(BaseModel):
+    """Structured payload returned to the orchestrator when an ambiguous or dangerous modal is encountered."""
+    status: str = Field(default="ACTION_BLOCKED_BY_MODAL", description="Escalation status indicator")
+    window_title: str = Field(description="Title bar of the blocking modal window")
+    dialog_body_text: str = Field(description="Text extracted from the dialog body")
+    risk_tier: ModalRiskTier = Field(description="Assessed risk classification tier")
+    detected_buttons: List[ModalButtonOption] = Field(default_factory=list, description="Available action buttons")
+    recommended_action_tool: str = Field(
+        default="resolve_modal_dialog",
+        description="Tool name to invoke with chosen button_id",
+    )
+
+
+class ModalTriageResult(BaseModel):
+    """Outcome of an autonomous modal inspection and triage cycle."""
+    detected: bool = Field(default=False, description="Whether a modal or popup was detected")
+    window_title: str = Field(default="", description="Title of the detected window")
+    body_text: str = Field(default="", description="Body text content of the dialog")
+    risk_tier: Optional[ModalRiskTier] = Field(default=None, description="Assessed risk tier")
+    auto_dismissed: bool = Field(default=False, description="Whether the modal was safely auto-dismissed")
+    action_taken: str = Field(default="", description="Description of the action taken (or escalation reason)")
+    extracted_summary: Optional[str] = Field(default=None, description="Information extracted from informative dialogs")
+    escalation: Optional[ModalEscalationPayload] = Field(default=None, description="Escalation details if blocked")
+
+
 class BoundingBox(BaseModel):
     """2D Bounding Box in physical desktop pixel coordinates."""
     x: int = Field(description="X coordinate of top-left corner")

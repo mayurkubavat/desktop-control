@@ -95,13 +95,37 @@ def dismiss_obstructions(
     max_attempts: int = 2,
 ) -> Dict[str, Any]:
     """
-    Autonomous defense: Detects and automatically dismisses blocking modal popups,
-    cookie banners, and browser permission requests ('Show notifications', 'Allow microphone').
+    Autonomous defense & modal triage: Detects and classifies blocking modal popups.
+    Safely auto-dismisses benign popups and acknowledges informative completion notices,
+    while halting and returning an escalation payload for workflow-branching or destructive dialogs.
 
     Args:
         max_attempts: Number of dismissal iterations.
     """
-    return controller.obstruction_interceptor.dismiss_if_present(max_attempts=max_attempts)
+    triage = controller.obstruction_interceptor.triage_and_resolve()
+    res = triage.model_dump()
+    res["obstruction_cleared"] = triage.auto_dismissed
+    res["actions_taken"] = [triage.action_taken] if triage.action_taken else []
+    return res
+
+
+@mcp_server.tool()
+def resolve_modal_dialog(
+    button_id: Optional[str] = None,
+    button_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves an escalated modal dialog by clicking the specified button option.
+    Allows the orchestrator to safely make decisions on branching or destructive modals (0 visual tokens).
+
+    Args:
+        button_id: Target button identifier from ModalEscalationPayload (e.g. 'btn_0', 'btn_1').
+        button_label: Target button label text (e.g. 'Cancel', 'Save', 'Overwrite').
+    """
+    return controller.obstruction_interceptor.resolve_pending_modal(
+        button_id=button_id,
+        button_label=button_label,
+    )
 
 
 @mcp_server.tool()

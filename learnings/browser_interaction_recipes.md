@@ -1,0 +1,55 @@
+---
+title: Browser Automation and Gemini Web Recipes
+tags:
+  - learnings/browser
+  - learnings/chrome
+  - recipe/gemini-web
+  - recipe/dropdown-selection
+aliases:
+  - Browser Interaction Recipes
+  - Chrome Automation Recipes
+created: 2026-10-25
+updated: 2026-10-25
+related:
+  - "[[INDEX]]"
+  - "[[../research/tool_ecosystem_comparison]]"
+  - "[[zero_token_element_discovery]]"
+---
+
+# Browser Automation and Gemini Web Recipes
+
+## 1. Interacting with Model Selectors in Gemini Web
+
+### Flow Demonstrated: Switching from `Flash-Lite` to `4 Argon`
+1. **Target Identification**:
+   * The active model indicator appears inside the prompt pill to the right of the text entry area (e.g., `Flash-Lite v`).
+2. **Opening the Menu**:
+   * Click the model selector pill (`x=2220, y=1701` on 3024x1898 display).
+   * Verify delta ($\approx 1.17\%$) confirming the popup menu opened.
+3. **Selecting the Target Model**:
+   * The dropdown lists models with subtitles:
+     * `3.5 Flash-Lite` (*Fastest answers*)
+     * `3.8 Flash` (*All-around help*)
+     * `3.1 Pro` (*Advanced reasoning*)
+     * `4 Argon` (*Complex tasks*)
+   * Click the item centered over `4 Argon` (`x=2060, y=1484`).
+   * Verify delta ($\approx 1.17\%$).
+4. **Verification**:
+   * Take a verification screenshot of the input bar: the pill label now displays `Argon v`.
+
+---
+
+## 2. Browser Dialogs & Obstruction Modals
+
+* **Browser Permission Popups ("Show notifications")**:
+  * Chrome prompts ("gemini.google.com wants to Show notifications") can appear above the chat viewport.
+  * In desktop X11 automation, pressing the `escape` key or clicking the `Block` / `x` button dismisses the overlay without interrupting the underlying page state.
+
+---
+
+## 3. Cadence-Aware Text Entry & Submission
+
+* When typing into rich web inputs (contenteditable `div` or React/Angular synthetic text areas):
+  * Do not inject text instantly at 0ms delay; rapid unpaced injection can cause React state updates to drop intermediate characters.
+  * Default `delay_ms=3.0` to `12.0ms` ensures browser input event loops process keystrokes reliably.
+  * If pressing Enter inside a multiline box inserts a newline rather than submitting, dispatch a click to the Submit/Send button or use `click_and_type(text="...", press_enter=True)`.

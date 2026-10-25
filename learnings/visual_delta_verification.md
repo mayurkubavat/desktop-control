@@ -1,0 +1,47 @@
+---
+title: Visual Delta Verification Tuning & Interpretation
+tags:
+  - learnings/verification
+  - technique/visual-delta
+  - parameter/min-delta-ratio
+  - parameter/settle-time
+aliases:
+  - Visual Delta Tuning
+  - Verification Interpretation
+created: 2026-10-25
+updated: 2026-10-25
+related:
+  - "[[INDEX]]"
+  - "[[../research/ai_orchestrators_and_vision_control]]"
+  - "[[linux_desktop_window_management]]"
+---
+
+# Visual Delta Verification Tuning & Interpretation
+
+## 1. Mathematical Formulation
+
+Visual delta is computed over downscaled pre- and post-action frames:
+
+$$\Delta_{ratio} = \frac{\sum_{i=1}^{W} \sum_{j=1}^{H} \mathbb{I}(|I_{after}(i,j) - I_{before}(i,j)| > \epsilon)}{W \times H}$$
+
+Where $\mathbb{I}$ is the indicator function and $\epsilon$ is the per-pixel intensity threshold (filtering out sensor noise and compression artifacts).
+
+---
+
+## 2. Practical Delta Ratios Observed
+
+| Action Type | Typical $\Delta_{ratio}$ | Interpretation |
+| :--- | :--- | :--- |
+| **Window Activation / Raise** | $85\% - 98\%$ | Entire application window replaces previous foreground window. |
+| **Typing into Prompt Field** | $5\% - 25\%$ | Text glyphs and caret blinking appear inside input box. |
+| **Dropdown Menu Open** | $0.8\% - 3.5\%$ | Small popup menu renders above or below button. |
+| **Page Scroll** | $8\% - 15\%$ | Viewport contents shift vertically. |
+| **No-Op / Missed Click** | $< 0.1\%$ | Click landed on non-clickable whitespace or disabled element. |
+
+---
+
+## 3. Tuning Settle Times
+
+* **Default Settle Time**: `settle_time_sec = 0.25` (250ms).
+* **CSS Animations / Transitions**: For sliding sidebars or modal fade-ins, wait up to `0.35s - 0.5s` before sampling the post-action frame.
+* **Network Navigation**: Use `wait_for_ui_change(timeout_seconds=15.0, min_delta_ratio=0.01)` to block until web page content loads asynchronously.

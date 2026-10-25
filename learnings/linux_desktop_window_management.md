@@ -1,0 +1,63 @@
+---
+title: Linux Desktop and X11 Window Management Learnings
+tags:
+  - learnings/linux
+  - learnings/x11
+  - protocol/ewmh
+  - bugfix/focus-window
+aliases:
+  - Linux Window Management
+  - X11 Focus Learnings
+created: 2026-10-25
+updated: 2026-10-25
+related:
+  - "[[INDEX]]"
+  - "[[../research/ai_orchestrators_and_vision_control]]"
+---
+
+# Linux Desktop and X11 Window Management Learnings
+
+## 1. The `focus_window()` ClientMessage Bug & Fix
+
+### Problem Observed
+During the live Chrome desktop session, calling `focus_window("0x6400003")` returned `{"success": false}`, leaving the target window obscured beneath the terminal.
+
+### Root Cause
+In `python-xlib`, constructing a `ClientMessage` requires importing from `Xlib.protocol.event`:
+```python
+# INCORRECT (threw AttributeError: 'error' object has no attribute 'display'):
+event = xlib_error.display.protocol.event.ClientMessage(...)
+
+# CORRECT:
+from Xlib.protocol import event as protocol_event
+event = protocol_event.ClientMessage(
+    window=win_int,
+    client_type=net_active_win,
+    data=(32, [1, X.CurrentTime, 0, 0, 0]),
+)
+```
+
+### Robust Multi-Stage Fallback Implementation
+Certain window managers (or non-EWMH compositors) do not honor redirected client messages. The hardened solution combines EWMH messages with direct X11 window mapping and stack configuration:
+
+```python
+# 1. Dispatch EWMH _NET_ACTIVE_WINDOW to Root Window
+root.send_event(event, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+
+# 2. Direct Window Map, Raise, and Focus Fallback
+win = self._x_display.create_resource_object("window", win_int)
+win.map()                              # Ensure window is mapped (unminimized)
+win.configure(stack_mode=X.Above)      # Raise to top of Z-order stack
+self._x_display.set_input_focus(win, X.RevertToParent, X.CurrentTime)
+self._x_display.sync()
+```
+
+---
+
+## 2. Minimized Window Taskbar Fallback
+
+When a window is minimized or iconified, its window coordinate translation might return coordinates outside the viewport. 
+
+* **Heuristic**: If `focus_window` does not activate the window, query `list_windows()` and `take_screenshot(mode="annotated_som")`.
+* The window's toggle button on the desktop panel/taskbar is exposed as an interactable toggle button (e.g. `'Google Gemini - Google Chrome'`).
+* Clicking that taskbar button immediately restores and activates the window with a verified visual delta $>90\%$.

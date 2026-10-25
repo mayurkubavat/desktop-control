@@ -8,7 +8,14 @@ waveform canvas focus management, and deterministic Tcl automation.
 import time
 from typing import Dict, List, Optional, Any
 from vision_mcp.plugins.base import BaseUIAppPlugin
-from vision_mcp.types import SubPaneROI, FeatureDescriptor, BoundingBox
+from vision_mcp.types import (
+    SubPaneROI,
+    FeatureDescriptor,
+    BoundingBox,
+    SubPaneLayoutSpec,
+    BoundaryConstraint,
+    AnchorEdge,
+)
 
 
 def _send_hotkey(hal, combo: str) -> None:
@@ -77,6 +84,37 @@ class VivadoPlugin(BaseUIAppPlugin):
                 offset_y=55,
                 relative_width=1.0,
                 relative_height=0.28,
+            ),
+        }
+
+        # Dynamic topological anchor specifications (Phase 5)
+        self.subpane_layouts = {
+            "tcl_console": SubPaneLayoutSpec(
+                pane_id="tcl_console",
+                top_constraint=BoundaryConstraint(
+                    anchor_selector='tab_item[name*="Tcl Console"]',
+                    edge=AnchorEdge.TOP,
+                    offset=-6,
+                ),
+                bottom_constraint=None,  # Window bottom
+                fallback_roi=self.sub_panes["tcl_console"],
+            ),
+            "flow_navigator": SubPaneLayoutSpec(
+                pane_id="flow_navigator",
+                right_constraint=BoundaryConstraint(
+                    anchor_selector=":sash_divider",
+                    edge=AnchorEdge.LEFT,
+                    offset=0,
+                ),
+                fallback_roi=self.sub_panes["flow_navigator"],
+            ),
+            "waveform_canvas": SubPaneLayoutSpec(
+                pane_id="waveform_canvas",
+                fallback_roi=self.sub_panes["waveform_canvas"],
+            ),
+            "workspace": SubPaneLayoutSpec(
+                pane_id="workspace",
+                fallback_roi=self.sub_panes["workspace"],
             ),
         }
 

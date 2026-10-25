@@ -910,6 +910,62 @@ def delete_crystallized_skill(
     }
 
 
+@mcp_server.tool()
+def capture_vdom(
+    window_id: Optional[str] = None,
+    title_filter: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Unified Virtual DOM (vDOM): Captures and indexes UI state by fusing AT-SPI2
+    accessibility semantics with local neural/CV proposals in < 30ms (0 cloud tokens).
+    
+    Args:
+        window_id: Optional target window ID to localize capture.
+        title_filter: Optional window title substring filter.
+        
+    Returns:
+        VirtualDOMSnapshot dictionary containing node hierarchy, bounds, and roles.
+    """
+    snapshot = controller.capture_vdom(window_id=window_id, title_filter=title_filter)
+    return snapshot.model_dump()
+
+
+@mcp_server.tool()
+def query_vdom(
+    selector: str,
+    window_id: Optional[str] = None,
+    refresh: bool = False,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    """
+    Zero-Token Spatial & Semantic Query: Searches the in-memory Virtual DOM using CSS-like
+    selectors and spatial constraints without sending screenshots to multimodal LLMs.
+    
+    Supported selector syntax:
+      - 'push_button[name*="Run Simulation"]'
+      - 'text_input:right_of("Period (ns):")'
+      - 'waveform_signal:inside("waveform_canvas")'
+      - 'push_button:below("Summary"):enabled'
+      - ':sash_divider'
+      - '#vdom_0142'
+      
+    Args:
+        selector: CSS spatial selector string.
+        window_id: Optional target window ID if refresh is needed.
+        refresh: Whether to capture a fresh snapshot before querying.
+        limit: Maximum number of matched nodes to return.
+        
+    Returns:
+        Dictionary with count and list of matched VDOMNode models.
+    """
+    nodes = controller.query_vdom(selector=selector, window_id=window_id, refresh=refresh, limit=limit)
+    return {
+        "count": len(nodes),
+        "selector": selector,
+        "nodes": [n.model_dump() for n in nodes],
+    }
+
+
 def main():
     """Starts the FastMCP server in standard I/O mode."""
     mcp_server.run()

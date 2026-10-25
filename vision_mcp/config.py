@@ -61,6 +61,30 @@ class VisionConfig(BaseModel):
         description="Persistent file path for storing crystallized parameterized skills.",
     )
 
+    # Local Neural Grounding Sidecar & Unified vDOM
+    enable_vdom: bool = Field(
+        default=True,
+        description="Whether to generate and maintain a unified hierarchical Virtual DOM (vDOM).",
+    )
+    vdom_sidecar_shm_path: str = Field(
+        default="/dev/shm/vision_mcp_fb",
+        description="Shared memory path for zero-copy IPC between MCP server and local neural daemon.",
+    )
+    vdom_fusion_iou_threshold: float = Field(
+        default=0.65,
+        description="Asymmetric IoU threshold for merging neural proposals with AT-SPI2 leaf nodes into HYBRID nodes.",
+    )
+    vdom_containment_ratio_threshold: float = Field(
+        default=0.85,
+        description="Containment threshold for nesting unmatched visual elements under parent containers.",
+    )
+
+    # Dynamic Anchor-Relative Sub-Pane Resolution
+    enable_dynamic_subpanes: bool = Field(
+        default=True,
+        description="Whether to resolve sub-pane boundaries dynamically relative to persistent UI anchors.",
+    )
+
     # Self-Healing Action Cache
     enable_action_cache: bool = Field(
         default=True,

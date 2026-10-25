@@ -144,9 +144,36 @@ class BoundingBox(BaseModel):
         return (self.x + self.width // 2, self.y + self.height // 2)
 
     @property
+    def right(self) -> int:
+        """Returns the right edge x coordinate."""
+        return self.x + self.width
+
+    @property
+    def bottom(self) -> int:
+        """Returns the bottom edge y coordinate."""
+        return self.y + self.height
+
+    @property
     def area(self) -> int:
         """Returns pixel area."""
-        return self.width * self.height
+        return max(0, self.width) * max(0, self.height)
+
+    def iou(self, other: "BoundingBox") -> float:
+        """Computes Intersection-over-Union with another bounding box."""
+        ix1, iy1 = max(self.x, other.x), max(self.y, other.y)
+        ix2, iy2 = min(self.right, other.right), min(self.bottom, other.bottom)
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        union = self.area + other.area - inter
+        return inter / union if union > 0 else 0.0
+
+    def containment_ratio(self, child: "BoundingBox") -> float:
+        """Fraction of child bounding box area contained within self."""
+        if child.area == 0:
+            return 0.0
+        ix1, iy1 = max(self.x, child.x), max(self.y, child.y)
+        ix2, iy2 = min(self.right, child.right), min(self.bottom, child.bottom)
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        return inter / child.area
 
 
 class UIElement(BaseModel):
@@ -284,4 +311,96 @@ class PluginSummary(BaseModel):
     is_active: bool = Field(default=False, description="Whether this plugin matches the current active foreground window")
     supported_panes: List[str] = Field(default_factory=list, description="Names of available sub-panes")
     features_count: int = Field(default=0, description="Total number of registered features")
+
+
+# =============================================================================
+# Phase 4: Local Neural Grounding Sidecar & Unified Virtual DOM (vDOM)
+# =============================================================================
+
+class GroundingSource(str, Enum):
+    """Source origin of a Virtual DOM node."""
+    AT_SPI2 = "AT_SPI2"           # Pure OS accessibility node
+    VISION_ONLY = "VISION_ONLY"   # Neural detector + OCR (OpenGL/Canvas/Custom Qt)
+    HYBRID = "HYBRID"             # Fused AT-SPI2 + Neural visual verification
+
+
+class UIRole(str, Enum):
+    """Normalized semantic UI roles across accessibility and visual grounding."""
+    WINDOW = "window"
+    DIALOG = "dialog"
+    PANEL = "panel"
+    CANVAS = "canvas"
+    TAB_ITEM = "tab_item"
+    PUSH_BUTTON = "push_button"
+    TOGGLE_BUTTON = "toggle_button"
+    CHECK_BOX = "check_box"
+    RADIO_BUTTON = "radio_button"
+    TEXT_INPUT = "text_input"
+    COMBO_BOX = "combo_box"
+    MENU_ITEM = "menu_item"
+    TREE_NODE = "tree_node"
+    TABLE_CELL = "table_cell"
+    SCHEMATIC_NET = "schematic_net"
+    SCHEMATIC_PIN = "schematic_pin"
+    WAVEFORM_SIGNAL = "waveform_signal"
+    ICON_BUTTON = "icon_button"
+    SASH_DIVIDER = "sash_divider"
+    STATUS_BAR = "status_bar"
+    STATIC_TEXT = "static_text"
+
+
+class VDOMNode(BaseModel):
+    """Unified Virtual DOM node fusing accessibility semantics and neural vision proposals."""
+    node_id: str = Field(description="Unique spatial/semantic identifier (e.g. 'vdom_8f3a')")
+    source: GroundingSource = Field(default=GroundingSource.AT_SPI2, description="Grounding source origin")
+    role: UIRole = Field(default=UIRole.STATIC_TEXT, description="Normalized semantic UI role")
+    name: str = Field(default="", description="Name, label, or OCR text string")
+    value: Optional[str] = Field(default=None, description="Optional dynamic value or input content")
+    states: List[str] = Field(default_factory=list, description="Active accessible states (ENABLED, VISIBLE, FOCUSED, etc.)")
+    bbox: BoundingBox = Field(description="Bounding box in physical screen pixel coordinates")
+    click_point: tuple[int, int] = Field(default=(0, 0), description="Optimal verified click coordinate (x, y)")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Detection / grounding confidence")
+    parent_id: Optional[str] = Field(default=None, description="Parent container node identifier")
+    children_ids: List[str] = Field(default_factory=list, description="Child node identifiers")
+    attributes: Dict[str, str] = Field(default_factory=dict, description="Custom application attributes (e.g. qt_name, net_name)")
+
+
+class VirtualDOMSnapshot(BaseModel):
+    """Immutable hierarchical snapshot of the desktop UI state."""
+    snapshot_id: str = Field(description="Unique snapshot identifier (e.g. 'snap_1729000000')")
+    timestamp: float = Field(description="Capture timestamp (monotonic)")
+    window_id: str = Field(default="", description="Window identifier if localized")
+    window_title: str = Field(default="", description="Target window title")
+    window_bbox: BoundingBox = Field(description="Window bounding box")
+    root_id: str = Field(default="", description="Root container node identifier")
+    nodes: Dict[str, VDOMNode] = Field(default_factory=dict, description="Lookup dictionary of all nodes by node_id")
+
+
+# =============================================================================
+# Phase 5: Dynamic Anchor-Relative Sub-Pane Resolution
+# =============================================================================
+
+class AnchorEdge(str, Enum):
+    """Edge direction for dynamic topological boundary anchoring."""
+    TOP = "TOP"
+    BOTTOM = "BOTTOM"
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+
+
+class BoundaryConstraint(BaseModel):
+    """Topological anchor constraint targeting a persistent vDOM element or layout edge."""
+    anchor_selector: str = Field(description="CSS/vDOM selector matching the anchor element (e.g. 'sash_divider', 'status_bar')")
+    edge: AnchorEdge = Field(description="Which edge of the anchor element serves as the boundary")
+    offset: int = Field(default=0, description="Pixel offset from the anchor edge (positive moves down/right)")
+
+
+class SubPaneLayoutSpec(BaseModel):
+    """Dynamic topological sub-pane specification resilient to window resize and sash movement."""
+    pane_id: str = Field(description="Unique sub-pane identifier (e.g. 'waveform_canvas', 'tcl_console')")
+    top_constraint: Optional[BoundaryConstraint] = Field(default=None, description="Top boundary constraint")
+    bottom_constraint: Optional[BoundaryConstraint] = Field(default=None, description="Bottom boundary constraint")
+    left_constraint: Optional[BoundaryConstraint] = Field(default=None, description="Left boundary constraint")
+    right_constraint: Optional[BoundaryConstraint] = Field(default=None, description="Right boundary constraint")
+    fallback_roi: Optional[SubPaneROI] = Field(default=None, description="Fallback static ROI if dynamic resolution fails")
 

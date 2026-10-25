@@ -20,6 +20,12 @@ from vision_mcp.crystallization import (
     TclTrajectoryCompiler,
     DynamicSkillRegistry,
 )
+from vision_mcp.vdom import (
+    VDOMFusionEngine,
+    VDOMQueryEngine,
+    LocalNeuralGrounder,
+    SubPaneLayoutSolver,
+)
 from vision_mcp.types import (
     ScreenshotResult,
     UIElement,
@@ -30,6 +36,11 @@ from vision_mcp.types import (
     PostConditionAssertion,
     StateAssertionType,
     ExecutionPhase,
+    GroundingSource,
+    UIRole,
+    VDOMNode,
+    VirtualDOMSnapshot,
+    SubPaneLayoutSpec,
 )
 from vision_mcp.config import CONFIG
 from vision_mcp.plugins.registry import PluginRegistry, PLUGIN_REGISTRY
@@ -68,6 +79,10 @@ class FeedbackLoopController:
         self.journal_correlator = JournalCorrelator()
         self.skill_registry = DynamicSkillRegistry()
         self.trajectory_compiler = TclTrajectoryCompiler()
+        self.vdom_fusion = VDOMFusionEngine()
+        self.neural_grounder = LocalNeuralGrounder()
+        self.layout_solver = SubPaneLayoutSolver()
+        self.last_vdom_snapshot: Optional[VirtualDOMSnapshot] = None
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
         self.last_clean_frame: Optional[Image.Image] = None
@@ -699,11 +714,110 @@ class FeedbackLoopController:
         if not plugin:
             plugin = self.plugin_registry.get("chrome")
 
-        pane_bbox = plugin.get_sub_pane(pane_name, target_win.bbox) if plugin else None
+        pane_bbox = None
+        # Dynamic anchor-relative sub-pane resolution (Phase 5)
+        if CONFIG.enable_dynamic_subpanes and plugin and hasattr(plugin, "get_subpane_layout_spec"):
+            spec = plugin.get_subpane_layout_spec(pane_name)
+            if spec:
+                if not self.last_vdom_snapshot:
+                    self.capture_vdom(window_id=target_win.window_id)
+                if self.last_vdom_snapshot:
+                    engine = VDOMQueryEngine(self.last_vdom_snapshot)
+                    pane_bbox = self.layout_solver.resolve_subpane(spec, engine, target_win.bbox)
+
+        # Fallback to static relative sub-pane calculation
+        if not pane_bbox and plugin:
+            pane_bbox = plugin.get_sub_pane(pane_name, target_win.bbox)
+
         if not pane_bbox:
             return self.capture_state(mode=mode, window_id=target_win.window_id)
 
         screen_size = self.hal.get_screen_size()
         clipped_region = self.window_clipper.clip_region_to_screen(pane_bbox, screen_size)
         return self.capture_state(mode=mode, region=clipped_region)
+
+    def _element_to_vdom(self, elem: UIElement) -> VDOMNode:
+        """Converts an accessibility UIElement to a VDOMNode."""
+        role_enum = UIRole.STATIC_TEXT
+        try:
+            role_enum = UIRole(elem.role.lower())
+        except ValueError:
+            if "button" in elem.role.lower():
+                role_enum = UIRole.PUSH_BUTTON
+            elif "text" in elem.role.lower():
+                role_enum = UIRole.TEXT_INPUT
+            elif "tab" in elem.role.lower():
+                role_enum = UIRole.TAB_ITEM
+
+        return VDOMNode(
+            node_id=f"vdom_{elem.id}",
+            source=GroundingSource.AT_SPI2,
+            role=role_enum,
+            name=elem.name,
+            states=list(elem.states),
+            bbox=elem.bbox,
+            click_point=elem.bbox.center,
+        )
+
+    def capture_vdom(
+        self,
+        window_id: Optional[str] = None,
+        title_filter: Optional[str] = None,
+    ) -> VirtualDOMSnapshot:
+        """
+        Captures desktop and accessibility state, fuses AT-SPI2 nodes with local neural/CV
+        proposals, and returns an indexed VirtualDOMSnapshot in < 30ms with 0 cloud tokens.
+        """
+        target_win = self.window_clipper.resolve_target_window(window_id=window_id, title_filter=title_filter)
+        if not target_win:
+            target_win = self.hal.get_active_window()
+
+        win_bbox = target_win.bbox if target_win else BoundingBox(x=0, y=0, width=1920, height=1080)
+        win_title = target_win.title if target_win else "Desktop"
+        win_id_str = target_win.window_id if target_win else ""
+
+        img, _, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=False)
+
+        # Write frame to shared memory (/dev/shm) for sidecar daemons
+        self.neural_grounder.write_frame_to_shm(img)
+
+        # Neural / CV visual proposals
+        visual_props = self.neural_grounder.generate_proposals(img, offset=(win_bbox.x, win_bbox.y))
+
+        # AT-SPI2 accessibility elements
+        atspi_elements = []
+        try:
+            atspi_elements = self.atspi_inspector.inspect_desktop(
+                app_name_filter=target_win.app_name if target_win else None
+            )
+        except Exception as e:
+            logger.debug(f"Failed to query AT-SPI2 hierarchy: {e}")
+
+        vdom_nodes = [self._element_to_vdom(elem) for elem in atspi_elements]
+
+        snapshot = self.vdom_fusion.fuse(
+            atspi_nodes=vdom_nodes,
+            visual_proposals=visual_props,
+            window_id=win_id_str,
+            window_title=win_title,
+            window_bbox=win_bbox,
+        )
+        self.last_vdom_snapshot = snapshot
+        return snapshot
+
+    def query_vdom(
+        self,
+        selector: str,
+        window_id: Optional[str] = None,
+        refresh: bool = False,
+        limit: int = 10,
+    ) -> List[VDOMNode]:
+        """
+        Executes zero-token spatial & semantic query over the Virtual DOM.
+        """
+        if self.last_vdom_snapshot is None or refresh:
+            self.capture_vdom(window_id=window_id)
+
+        engine = VDOMQueryEngine(self.last_vdom_snapshot)
+        return engine.query_selector(selector, limit=limit)
 

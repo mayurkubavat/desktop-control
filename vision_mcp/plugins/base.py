@@ -2,7 +2,13 @@
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
-from vision_mcp.types import BoundingBox, SubPaneROI, FeatureDescriptor, PluginSummary
+from vision_mcp.types import (
+    BoundingBox,
+    SubPaneROI,
+    FeatureDescriptor,
+    PluginSummary,
+    SubPaneLayoutSpec,
+)
 
 
 class BaseUIAppPlugin(ABC):
@@ -18,6 +24,7 @@ class BaseUIAppPlugin(ABC):
 
     def __init__(self) -> None:
         self.sub_panes: Dict[str, SubPaneROI] = {}
+        self.subpane_layouts: Dict[str, SubPaneLayoutSpec] = {}
         self.feature_map: Dict[str, FeatureDescriptor] = {}
         self._register_panes()
         self._register_features()
@@ -58,6 +65,15 @@ class BaseUIAppPlugin(ABC):
         if not pane:
             return None
         return pane.compute_bounds(window_bbox)
+
+    def get_subpane_layout_spec(self, pane_name: str) -> Optional[SubPaneLayoutSpec]:
+        """
+        Returns dynamic anchor-relative layout spec for sub-pane if defined.
+        
+        Args:
+            pane_name: Identifier of requested sub-pane.
+        """
+        return self.subpane_layouts.get(pane_name.lower())
 
     def list_features(self) -> List[FeatureDescriptor]:
         """Returns all declarative features supported by this plugin."""

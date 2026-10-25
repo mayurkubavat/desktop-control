@@ -2,6 +2,7 @@
 
 import re
 import time
+import logging
 from typing import Optional, Dict, Tuple, List, Callable
 from PIL import Image
 
@@ -14,6 +15,11 @@ from vision_mcp.perception.token_optimizer import TokenOptimizer
 from vision_mcp.perception.window_clipper import WindowClipper
 from vision_mcp.agent_loop.cache import ActionCache
 from vision_mcp.agent_loop.obstruction import ObstructionInterceptor
+from vision_mcp.crystallization import (
+    JournalCorrelator,
+    TclTrajectoryCompiler,
+    DynamicSkillRegistry,
+)
 from vision_mcp.types import (
     ScreenshotResult,
     UIElement,
@@ -28,6 +34,8 @@ from vision_mcp.types import (
 from vision_mcp.config import CONFIG
 from vision_mcp.plugins.registry import PluginRegistry, PLUGIN_REGISTRY
 from vision_mcp.plugins.base import BaseUIAppPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class FeedbackLoopController:
@@ -57,6 +65,9 @@ class FeedbackLoopController:
             if CONFIG.enable_quiescence_monitor
             else None
         )
+        self.journal_correlator = JournalCorrelator()
+        self.skill_registry = DynamicSkillRegistry()
+        self.trajectory_compiler = TclTrajectoryCompiler()
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
         self.last_clean_frame: Optional[Image.Image] = None
@@ -300,14 +311,31 @@ class FeedbackLoopController:
         settle_time_sec: Optional[float] = None,
         verify_delta: bool = True,
         contract: Optional[PostConditionContract] = None,
+        ui_target_text: str = "",
     ) -> ActionVerificationResult:
         """
         Executes action with automated event-driven quiescence and post-condition verification.
         """
+        # If recording skills, mark start offset
+        if self.journal_correlator.is_recording:
+            self.journal_correlator.mark_pre_action()
+
         # If verification is disabled, dispatch action immediately
         if not verify_delta:
+            t_action_start = time.monotonic()
             try:
                 action_func()
+                if self.journal_correlator.is_recording:
+                    try:
+                        self.journal_correlator.harvest_post_quiescence(
+                            action_id=f"{action_name}_{int(t_action_start * 1000)}",
+                            gui_intent=action_name,
+                            ui_target_text=ui_target_text,
+                            t_start=t_action_start,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to harvest post-quiescence journal entries: {e}")
+
                 return ActionVerificationResult(
                     success=True,
                     action_type=action_name,
@@ -401,6 +429,17 @@ class FeedbackLoopController:
                 delta_detected = delta > 0.001
             except Exception:
                 pass
+
+        if self.journal_correlator.is_recording:
+            try:
+                self.journal_correlator.harvest_post_quiescence(
+                    action_id=f"{action_name}_{int(t_action_start * 1000)}",
+                    gui_intent=action_name,
+                    ui_target_text=ui_target_text,
+                    t_start=t_action_start,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to harvest post-quiescence journal entries: {e}")
 
         details_msg = f" | Contract details: {'; '.join(contract_details)}" if contract_details else ""
         status_msg = (

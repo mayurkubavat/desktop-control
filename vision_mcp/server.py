@@ -5,7 +5,9 @@ perception with Set-of-Marks, pluggable GroundingEngine (ensemble, semantic, cv,
 input injection, compound autonomous actions, and closed-loop verification.
 """
 
+import os
 import sys
+import tempfile
 import subprocess
 import time
 from typing import Optional, List, Dict, Any
@@ -721,6 +723,191 @@ def capture_pane(
         mode=mode,
     )
     return result.model_dump()
+
+
+@mcp_server.tool()
+def start_skill_recording(
+    journal_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    GUI-to-Script Crystallization: Starts recording physical GUI actions and correlations
+    with application command journal streams (e.g. vivado.jou, novas.cmd).
+    
+    Args:
+        journal_path: Path to application journal file. If omitted, uses default or existing path.
+    """
+    if journal_path:
+        controller.journal_correlator.set_journal_path(journal_path)
+    elif not controller.journal_correlator.journal_path:
+        candidates = [
+            "/home/mk/DV/vivado_fifo/vivado.jou",
+            os.path.abspath("vivado.jou"),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                controller.journal_correlator.set_journal_path(c)
+                break
+
+    controller.journal_correlator.start_recording()
+    return {
+        "success": True,
+        "recording": True,
+        "journal_path": controller.journal_correlator.journal_path,
+        "message": f"Skill recording started. Tracking commands from '{controller.journal_correlator.journal_path}'.",
+    }
+
+
+@mcp_server.tool()
+def stop_skill_recording() -> Dict[str, Any]:
+    """
+    Stops active skill recording and returns summary of captured action steps.
+    """
+    steps = controller.journal_correlator.stop_recording()
+    return {
+        "success": True,
+        "recording": False,
+        "recorded_steps_count": len(steps),
+        "steps": [s.model_dump() for s in steps],
+        "message": f"Skill recording stopped. Captured {len(steps)} correlated GUI action steps.",
+    }
+
+
+@mcp_server.tool()
+def crystallize_skill(
+    skill_name: str,
+    task_prompt: str,
+    app_target: str = "vivado_2025.1",
+    extracted_entities: Optional[Dict[str, Any]] = None,
+    verification_cmd: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Compiles recorded GUI trajectory into a parameterized, deterministic Tcl/CLI skill,
+    lifting entity literals into Jinja2 parameters and saving to dynamic skill registry.
+    
+    Args:
+        skill_name: Identifier for the new skill (e.g. 'run_sim_fifo').
+        task_prompt: Natural language description of the demonstrated task.
+        app_target: Target application suite (default 'vivado_2025.1').
+        extracted_entities: Dictionary of literal parameters to lift into variables (e.g. {'runtime': '10us', 'radix': 'hex'}).
+        verification_cmd: Tcl assertion command for post-execution verification.
+        description: Detailed summary of what this crystallized skill accomplishes.
+    """
+    steps = controller.journal_correlator.recorded_steps
+    if not steps:
+        return {
+            "success": False,
+            "message": "No recorded trajectory steps found. Run start_skill_recording() and perform GUI actions first.",
+        }
+
+    spec = controller.trajectory_compiler.compile_trajectory(
+        steps=steps,
+        task_prompt=task_prompt,
+        extracted_entities=extracted_entities,
+        skill_name=skill_name,
+        app_target=app_target,
+        description=description,
+        verification_cmd=verification_cmd,
+    )
+    controller.skill_registry.register_skill(spec)
+    return {
+        "success": True,
+        "skill": spec.model_dump(),
+        "message": f"Successfully crystallized skill '{skill_name}' with {len(spec.parameters)} parameters.",
+    }
+
+
+@mcp_server.tool()
+def execute_crystallized_skill(
+    skill_name: str,
+    arguments: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes a crystallized parameterized skill with 0 visual tokens by compiling
+    the template and executing deterministically via application CLI/Tcl bridge.
+    
+    Args:
+        skill_name: Identifier of the crystallized skill to execute.
+        arguments: Dynamic arguments overriding default parameters.
+    """
+    spec = controller.skill_registry.get_skill(skill_name)
+    if not spec:
+        return {
+            "success": False,
+            "skill_name": skill_name,
+            "message": f"Skill '{skill_name}' not found in dynamic skill registry.",
+        }
+
+    t_start = time.monotonic()
+    try:
+        rendered_script = controller.skill_registry.render_script(skill_name, arguments)
+    except Exception as e:
+        return {
+            "success": False,
+            "skill_name": skill_name,
+            "message": f"Failed to render skill template: {e}",
+        }
+
+    plugin = controller.get_active_plugin()
+    exec_msg = ""
+    success = True
+
+    if plugin and "vivado" in plugin.app_id:
+        with tempfile.NamedTemporaryFile("w", suffix=".tcl", delete=False) as f:
+            f.write(rendered_script + "\n")
+            temp_path = f.name
+
+        try:
+            res = plugin.execute_feature(
+                "vivado.tcl_exec",
+                controller,
+                {"command": f"source {temp_path}"},
+            )
+            success = res.get("success", True)
+            exec_msg = f"Sourced {temp_path} into Vivado Tcl Console"
+        finally:
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+    else:
+        exec_msg = f"Rendered and executed script ({len(rendered_script.splitlines())} lines)"
+
+    elapsed_ms = (time.monotonic() - t_start) * 1000.0
+    return {
+        "success": success,
+        "skill_name": skill_name,
+        "rendered_tcl": rendered_script,
+        "execution_time_ms": round(elapsed_ms, 2),
+        "message": f"Skill '{skill_name}' executed in {elapsed_ms:.1f}ms: {exec_msg}",
+    }
+
+
+@mcp_server.tool()
+def list_crystallized_skills() -> Dict[str, Any]:
+    """
+    Lists all registered crystallized skills available for zero-visual-token deterministic execution.
+    """
+    skills = controller.skill_registry.list_skills()
+    return {
+        "count": len(skills),
+        "skills": [s.model_dump() for s in skills],
+    }
+
+
+@mcp_server.tool()
+def delete_crystallized_skill(
+    skill_name: str,
+) -> Dict[str, Any]:
+    """
+    Deletes a crystallized skill from the registry.
+    """
+    deleted = controller.skill_registry.delete_skill(skill_name)
+    return {
+        "success": deleted,
+        "skill_name": skill_name,
+        "message": f"Skill '{skill_name}' deleted." if deleted else f"Skill '{skill_name}' not found.",
+    }
 
 
 def main():

@@ -94,6 +94,43 @@ class ModalTriageResult(BaseModel):
     escalation: Optional[ModalEscalationPayload] = Field(default=None, description="Escalation details if blocked")
 
 
+class CorrelatedStep(BaseModel):
+    """Single GUI action correlated with underlying journal stream commands."""
+    action_id: str = Field(description="Unique action execution identifier")
+    gui_intent: str = Field(description="High-level description of what the GUI action was intended to perform")
+    ui_target_text: str = Field(default="", description="Target text label or accessible name clicked/addressed")
+    timestamp_start: float = Field(default=0.0, description="Action start time (monotonic)")
+    timestamp_end: float = Field(default=0.0, description="Action completion & UI quiescence time (monotonic)")
+    journal_lines: List[str] = Field(default_factory=list, description="Echoed journal/CLI command lines captured")
+
+
+class CrystallizedSkillSpec(BaseModel):
+    """Specification of a reusable parameterized skill compiled from GUI exploration."""
+    skill_name: str = Field(description="Unique identifier for the skill (e.g. 'vivado_create_custom_clock')")
+    description: str = Field(description="Human-readable description of what this parameterized skill does")
+    app_target: str = Field(default="vivado_2025.1", description="Target application identifier")
+    tcl_template: str = Field(description="Parameterized Jinja2 script template")
+    parameters: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="JSON Schema property definitions for parameterized arguments",
+    )
+    verification_cmd: str = Field(
+        default="",
+        description="Command to execute for verifying post-execution status",
+    )
+    source_steps_count: int = Field(default=0, description="Number of GUI steps crystallized into this skill")
+
+
+class SkillExecutionResult(BaseModel):
+    """Outcome of executing a crystallized skill via direct API / Tcl RPC."""
+    success: bool = Field(description="Whether the skill script executed without error")
+    skill_name: str = Field(description="Name of the skill executed")
+    rendered_script: str = Field(description="Exact rendered script dispatched to target application")
+    output: str = Field(default="", description="Execution response / log output")
+    verification: str = Field(default="", description="Verification command outcome")
+    elapsed_ms: float = Field(default=0.0, description="Execution duration in milliseconds")
+
+
 class BoundingBox(BaseModel):
     """2D Bounding Box in physical desktop pixel coordinates."""
     x: int = Field(description="X coordinate of top-left corner")

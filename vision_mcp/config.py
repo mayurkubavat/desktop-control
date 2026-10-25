@@ -51,6 +51,16 @@ class VisionConfig(BaseModel):
         description="Pixel area threshold to filter out tiny caret blinks during damage accumulation.",
     )
 
+    # GUI-to-Script Skill Crystallization
+    enable_skill_crystallization: bool = Field(
+        default=True,
+        description="Whether to capture and correlate underlying application journal streams into reusable Tcl/CLI scripts.",
+    )
+    crystallized_skills_path: str = Field(
+        default="~/.gemini/antigravity-cli/skills/crystallized_skills.json",
+        description="Persistent file path for storing crystallized parameterized skills.",
+    )
+
     # Self-Healing Action Cache
     enable_action_cache: bool = Field(
         default=True,

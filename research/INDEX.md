@@ -37,6 +37,9 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
   * Sliding visual windows, delta-patching, semantic pruning, and locator caching.
 * [[future_enhancements_roadmap|Next-Generation Enhancement Roadmap]]
   * Six architectural frontiers: Action Caching, Obstruction Interception, Macro Trajectories, Per-Window Perception, State Rollback, and Embedded OCR.
+* [[ui_tool_plugin_architecture|UI Tool Plugin Architecture & Consolidated Strategy]]
+  * Handling complex applications with 100s of features (EDA tools, IDEs, CAD suites).
+  * Declarative Feature Maps, Sub-Pane ROI routing, automated menu traversal, and phased roadmap.
 
 ---
 

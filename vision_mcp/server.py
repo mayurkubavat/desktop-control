@@ -19,6 +19,7 @@ except ImportError:
 
 from vision_mcp.hal.factory import get_desktop_hal
 from vision_mcp.agent_loop.controller import FeedbackLoopController
+from vision_mcp.agent_loop.trajectory import TrajectoryEngine
 from vision_mcp.types import FindElementResult, DiagnosticsResult
 from vision_mcp.config import CONFIG
 
@@ -26,6 +27,7 @@ from vision_mcp.config import CONFIG
 mcp_server = MCPServer("vision-control-mcp")
 hal = get_desktop_hal()
 controller = FeedbackLoopController(hal)
+trajectory_engine = TrajectoryEngine(controller)
 
 
 @mcp_server.tool()
@@ -974,6 +976,43 @@ def query_vdom(
         "selector": selector,
         "nodes": [n.model_dump() for n in nodes],
     }
+
+
+@mcp_server.tool()
+def execute_trajectory(
+    trajectory_spec: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Local Macro & Trajectory Dispatcher: Executes a structured multi-step declarative trajectory locally
+    at native OS speeds, eliminating dozens of intermediate round-trips to multimodal LLMs.
+
+    Supported action primitives:
+      - 'focus_window': {"title": "..."} or {"window_id": "..."}
+      - 'find_and_click': {"query": "...", "button": "left", "verify_delta": true}
+      - 'click': {"x": 100, "y": 200} or {"query": "..."}
+      - 'click_and_type': {"query": "...", "text": "...", "press_enter": true}
+      - 'type_text': {"text": "...", "press_enter": true}
+      - 'hotkey': {"keys": ["ctrl", "s"]}
+      - 'press_key': {"key": "enter"}
+      - 'scroll': {"dx": 0, "dy": -5}
+      - 'wait': {"duration_sec": 1.5}
+      - 'wait_for_ui_change': {"timeout": 5.0}
+      - 'capture_pane': {"pane_name": "waveform_canvas"}
+      - 'capture_vdom': {"query_selector": "push_button[name*='Run']"}
+      - 'query_vdom': {"selector": "push_button"}
+      - 'execute_crystallized_skill': {"skill_name": "...", "parameters": {...}}
+      - 'run_terminal_command': {"command": "..."}
+      - 'dismiss_obstructions': {}
+
+    Args:
+        trajectory_spec: Structured dictionary specifying trajectory_name, variables, and steps.
+
+    Returns:
+        TrajectoryExecutionResult dictionary detailing per-step timing, success, assertions,
+        and estimated multimodal tokens saved.
+    """
+    res = trajectory_engine.execute_trajectory(trajectory_spec)
+    return res.model_dump()
 
 
 def main():

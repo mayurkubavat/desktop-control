@@ -404,3 +404,62 @@ class SubPaneLayoutSpec(BaseModel):
     right_constraint: Optional[BoundaryConstraint] = Field(default=None, description="Right boundary constraint")
     fallback_roi: Optional[SubPaneROI] = Field(default=None, description="Fallback static ROI if dynamic resolution fails")
 
+
+# =============================================================================
+# Option 4: Local Macro & Trajectory Dispatcher
+# =============================================================================
+
+class TrajectoryStep(BaseModel):
+    """Declarative specification for a single action step within a batch trajectory."""
+    step_id: str = Field(description="Unique identifier for the step (e.g. 'focus_window', 'click_tab')")
+    action: str = Field(
+        description="Action primitive: focus_window, click, find_and_click, click_and_type, type_text, "
+                    "press_key, hotkey, scroll, wait, wait_for_ui_change, capture_pane, capture_vdom, "
+                    "query_vdom, execute_crystallized_skill, run_terminal_command, dismiss_obstructions"
+    )
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Action-specific parameters")
+    description: str = Field(default="", description="Human-readable description of intent")
+    verify_delta: bool = Field(default=True, description="Whether to verify UI delta after step")
+    assertions: List[Dict[str, Any]] = Field(default_factory=list, description="Optional post-step assertions")
+    retry_count: int = Field(default=1, ge=1, le=5, description="Number of retry attempts if step fails")
+    timeout_sec: float = Field(default=15.0, description="Max execution timeout in seconds for this step")
+    continue_on_failure: bool = Field(default=False, description="Whether to continue executing subsequent steps if this step fails")
+
+
+class TrajectorySpec(BaseModel):
+    """Specification of a multi-step declarative trajectory executed locally at native speeds."""
+    trajectory_name: str = Field(description="Unique name or title of the trajectory")
+    description: str = Field(default="", description="High-level description of the workflow")
+    variables: Dict[str, Any] = Field(default_factory=dict, description="Template variables for parameter interpolation")
+    steps: List[TrajectoryStep] = Field(description="Ordered list of steps to execute")
+    stop_on_failure: bool = Field(default=True, description="Whether to abort remaining steps if a step fails")
+    capture_final_screenshot: bool = Field(default=False, description="Whether to return a final base64 screenshot")
+
+
+class StepExecutionResult(BaseModel):
+    """Outcome of an individual trajectory step execution."""
+    step_id: str = Field(description="Identifier of the executed step")
+    action: str = Field(description="Action executed")
+    success: bool = Field(description="Whether the step executed without error and met all assertions")
+    elapsed_ms: float = Field(default=0.0, description="Execution duration in milliseconds")
+    message: str = Field(default="", description="Execution status or error message")
+    delta_detected: bool = Field(default=False, description="Whether visual delta was detected post-step")
+    output_data: Dict[str, Any] = Field(default_factory=dict, description="Structured outputs produced by the action")
+    error: Optional[str] = Field(default=None, description="Error details if failed")
+
+
+class TrajectoryExecutionResult(BaseModel):
+    """Comprehensive outcome of executing a declarative multi-step trajectory."""
+    success: bool = Field(description="Whether all required steps executed successfully")
+    trajectory_name: str = Field(description="Name of the executed trajectory")
+    total_steps: int = Field(default=0, description="Total steps in the trajectory")
+    executed_steps: int = Field(default=0, description="Number of steps actually executed")
+    successful_steps: int = Field(default=0, description="Number of steps that succeeded")
+    failed_steps: int = Field(default=0, description="Number of steps that failed")
+    elapsed_ms: float = Field(default=0.0, description="Total trajectory execution duration in milliseconds")
+    estimated_tokens_saved: int = Field(default=0, description="Estimated multimodal LLM tokens saved by local batching")
+    step_results: List[StepExecutionResult] = Field(default_factory=list, description="Per-step execution outcomes")
+    final_screenshot_b64: Optional[str] = Field(default=None, description="Optional final screen capture")
+    message: str = Field(default="", description="Overall trajectory status message")
+
+

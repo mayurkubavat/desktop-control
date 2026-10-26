@@ -339,3 +339,70 @@ The dispatcher was validated against the live, running Vivado 2025.1 CDC FIFO si
   5. `test_trajectory_continue_on_failure`: Verifies error recovery policies.
   6. `test_trajectory_invoke_plugin_feature`: Verifies domain plugin integration.
 - Full regression suite: **89/89 passing tests** (100% pass rate).
+
+---
+
+## 11. Future Implementation Roadmap & Design Specifications (Backlog)
+
+The following 5 engineering frontiers are prioritized for future implementation, expanding Vision MCP into advanced multi-tool EDA verification, interactive diagnostics, and zero-copy IPC streaming:
+
+```mermaid
+flowchart LR
+    A["Frontier 1:<br/>Synopsys Verdi Plugin<br/>(vision_mcp/plugins/verdi.py)"] --> B["Frontier 2:<br/>Interactive SoM Debugger<br/>(debug_vdom_overlay)"]
+    B --> C["Frontier 3:<br/>State Checkpointing & Rollback<br/>(TransactionManager)"]
+    C --> D["Frontier 4:<br/>C-Native /dev/shm Daemon<br/>(Lock-free 60 FPS seqlock)"]
+    D --> E["Frontier 5:<br/>Antigravity MCP Package<br/>(/vision command + auto-launch)"]
+```
+
+### 11.1 Frontier 1: Synopsys Verdi Automation Plugin (`vision_mcp/plugins/verdi.py`)
+- **Motivation**: Verdi is the industry standard for gate-level/RTL debug, FSDB waveform inspection, and causality tracing in enterprise semiconductor verification.
+- **Key Deliverables**:
+  1. Sub-Panes:
+     - `nTrace`: Source code hierarchy, signal driver/load browser, and active line tracking.
+     - `nWave`: Waveform display area, signal value columns, cursor delta measurements (`C1`, `C2`).
+     - `nSchema`: Gate-level and RTL schematic navigation viewer.
+     - `temporal_flow_view`: Clock-domain crossing and causality transaction flow.
+  2. Declarative Features:
+     - `verdi.trace_driver` (`Ctrl+D`): Trace active signal driver back to RTL.
+     - `verdi.trace_load` (`Ctrl+L`): Trace signal fanout.
+     - `verdi.zoom_fit` (`F` key): Zoom nWave canvas to full simulation duration.
+     - `verdi.add_signal`: Tcl command / drag-and-drop signal addition.
+     - `verdi.command_exec`: Sourcing Tcl commands to Verdi CLI.
+  3. Skill Crystallization:
+     - Track `novas.cmd` / `verdi.cmd` byte offsets using [`JournalCorrelator`](file:///home/mk/DV/git/Vision/vision_mcp/crystallization/correlator.py#L25) to compile Verdi GUI workflows into reusable zero-token Tcl scripts.
+
+### 11.2 Frontier 2: Interactive SoM Visual Debugger (`debug_vdom_overlay`)
+- **Motivation**: Debugging complex spatial layouts, OCR misalignments, or AT-SPI2 hierarchy issues currently requires inspecting raw logs or text trees.
+- **Key Deliverables**:
+  1. FastMCP Tool: `debug_vdom_overlay(window_id=None, format='annotated_image'|'html_inspector')`.
+  2. Visual Badge Overlays:
+     - Numbered Set-of-Marks (SoM) badges drawn directly on the screenshot.
+     - Color-coded by ground source: Green (Hybrid AT-SPI2+Vision), Blue (Accessible), Purple (FastONNX), Amber (Template matched).
+  3. Interactive HTML Inspector:
+     - Lightweight standalone HTML/SVG page with responsive pan-and-zoom, collapsible DOM tree, and instant click-to-copy coordinate badge properties.
+
+### 11.3 Frontier 3: State Checkpointing & Rollback Engine (`StateManager`)
+- **Motivation**: Prevent unrecoverable dead-ends during multi-step autonomous exploration (e.g., closing wrong tabs, corrupting simulation state, entering modal deadlocks).
+- **Key Deliverables**:
+  1. Class `TransactionManager` in `vision_mcp/agent_loop/transactions.py`.
+  2. Pre-Action Snapshots: Light metadata capture of active window IDs, document tab paths, and undo stack depth.
+  3. Rollback Strategies:
+     - OS-level undo (`Ctrl+Z`, `u` in vim, `undo` in EDA consoles).
+     - Navigational recovery (`Alt+Left`, browser back, window reopen).
+     - File system rollback via Git stash or copy-on-write temp trees.
+  4. Declarative Integration: Flag `rollback_on_failure: bool = True` in [`TrajectoryStep`](file:///home/mk/DV/git/Vision/vision_mcp/types.py#L425) to automatically restore pre-trajectory state if assertions fail.
+
+### 11.4 Frontier 4: C-Native `/dev/shm` Zero-Copy Frame Streaming Daemon (`shm_streamer`)
+- **Motivation**: Python `mss`/`Xlib` frame extraction incurs 10–18ms per capture. Continuous visual tracking (e.g., watching a running waveform or real-time simulation progress) requires 60+ FPS capture with sub-millisecond overhead.
+- **Key Deliverables**:
+  1. C/Rust Daemon: `vision_mcp/bin/shm_streamer` using X11 `XShmCreateImage` (MIT-SHM extension).
+  2. Lock-Free IPC: Dual-buffer ring buffer in `/dev/shm/vision_mcp_fb` with atomic seqlock read/write barriers.
+  3. Zero-Copy Python Reads: Python NumPy buffer mapping (`np.frombuffer`) directly accessing `/dev/shm/vision_mcp_fb` in **< 0.2 ms** latency, enabling true 60 FPS visual feedback loops.
+
+### 11.5 Frontier 5: Antigravity MCP Packaging & Production Installation
+- **Motivation**: Seamlessly integrate the complete Vision Control MCP 2.0 system into the user's daily Antigravity IDE and CLI workflows.
+- **Key Deliverables**:
+  1. MCP Configuration: Entry in `~/.gemini/antigravity-cli/mcp_config.json` with auto-reconnect and environment variables (`DISPLAY`, `OLLAMA_IGPU_ENABLE`).
+  2. Sidecar Process Management: Automated health checks and background startup of Ollama and the ONNX Fast-Path detector on MCP launch.
+  3. User Slash Command: Custom command `/vision` in `~/.gemini/antigravity-cli/builtin/commands/vision.md` allowing users to invoke desktop vision routines with one keystroke.
+  4. Obsidian Knowledge Base Export: Synchronize research notes to `~/Obsidian/Vision/` with bidirectional wikilinks.

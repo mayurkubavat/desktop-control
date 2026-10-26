@@ -48,7 +48,8 @@ This repository contains practical discoveries, troubleshooting runbooks, and ha
 ### 3. Agentic Performance & Token Optimization
 * [[vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
   * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
-  * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).
+  * Extended Phase-4/5 upgrades: Fast-Path ONNX UI Detector (8.34ms), Self-Healing Action Cache, Local Gemma 3 VLM sidecar, and Local Macro Trajectory Dispatcher (`execute_trajectory`).
+  * 100% verified test suite (89/89 tests) and comprehensive future engineering roadmap (Verdi plugin, Interactive SoM debugger, State rollback, C-native `/dev/shm` streaming, Antigravity packaging).
 * [[zero_token_element_discovery|Zero-Token Element Discovery & Compound Actions]]
   * When to use `find_element` and `find_and_click` before taking full screenshots.
   * Using `click_and_type` to combine 4 actions into a single atomic step.

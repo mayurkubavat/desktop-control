@@ -24,7 +24,7 @@ from vision_mcp.types import FindElementResult, DiagnosticsResult
 from vision_mcp.config import CONFIG
 
 # Initialize Server and Feedback Loop Controller
-mcp_server = MCPServer("vision-control-mcp")
+mcp_server = MCPServer("desktop-control")
 hal = get_desktop_hal()
 controller = FeedbackLoopController(hal)
 trajectory_engine = TrajectoryEngine(controller)

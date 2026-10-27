@@ -1,145 +1,200 @@
-# Vision Control MCP Server
+# Desktop Control
 
-An autonomous **Vision Control Model Context Protocol (MCP)** server that enables multimodal AI agents (Antigravity, Claude, Gemini CLI, local VLMs) to perceive, reason about, and physically navigate Linux desktop environments (X11 & Wayland) as well as Windows systems.
+A Model Context Protocol (MCP) server for desktop automation, screen perception, and window management on Linux and Windows.
 
-Built with a **continuous perception-action-verification feedback loop**, the server combines semantic OS accessibility trees, pure Computer Vision, visual Set-of-Marks (SoM) prompting, and high-level compound actions to eliminate coordinate hallucination, dramatically minimize token consumption, and provide rock-solid desktop automation.
-
----
-
-## 1. Key Architectural Enhancements
-
-* **Hotswappable Pluggable Grounding Engine (`GroundingEngine`):**
-  * **Ensemble Strategy (Default):** Fuses semantic OS accessibility trees with Computer Vision contours and template matching using Non-Maximum Suppression (IoU deduplication). Semantic names and roles enrich visual bounding boxes.
-  * **Semantic Strategy:** Directly inspects Linux AT-SPI2 / D-Bus (`org.a11y.Bus`) for 100% ground-truth element names, text fields, menu hierarchies, roles, and physical bounding boxes.
-  * **Pure Computer Vision Strategy (`CVDetector`):** Detects interactive components directly from screenshot pixels via multi-scale Canny edge contours and MSER text regions for canvas web apps, games, and legacy X11 utilities.
-  * **Template Matching Strategy:** Matches specific icons or UI widgets using normalized cross-correlation (`cv2.TM_CCOEFF_NORMED` and `TM_SQDIFF_NORMED`).
-  * **Dynamic Hotswapping:** Switch strategies on the fly using `configure_vision(setting="grounding_strategy", value="semantic")`.
-* **Zero-Token Element Lookup (`find_element` & `find_and_click`):**
-  * Allows agents to locate and click buttons or fields by text label without sending expensive full-screen images into LLM multimodal context.
-* **Atomic Compound Actions (`click_and_type`):**
-  * Combines element focusing, text clearing (`Ctrl+A` $\rightarrow$ `Backspace`), typing with cadence, Enter submission, and visual delta verification in a single atomic tool call.
-* **Token & Context Optimizer (`TokenOptimizer`):**
-  * Isolates localized delta patches between before-and-after frames to compress visual verification payloads by 70–90%.
-* **Closed-Loop Feedback & Delta Verification:**
-  * Every physical action automatically calculates visual pixel deltas ($\Delta_{ratio}$) to confirm whether the UI reacted before proceeding.
-* **Hardware Abstraction Layer (HAL):**
-  * **Linux Backend:** Native X11 window management with robust `_NET_ACTIVE_WINDOW` ClientMessage event dispatching, fallback stack-raising, active window tracking, and `mss` screen capture.
-  * **Windows Backend:** Extensible HAL architected for GPU DXGI duplication (`dxcam`), Win32 `SendInput` with `PerMonitorV2` DPI scaling awareness, and `UIA3`.
+`desktop-control` lets AI coding assistants and autonomous agents (such as Antigravity, Claude, and Gemini) interact with graphical desktop applications. It provides tools for screen capture, mouse and keyboard control, UI element detection, window management, and executing multi-step action scripts.
 
 ---
 
-## 2. Architecture Diagram
+## Features
 
-```mermaid
-flowchart TB
-    subgraph Client ["Multimodal AI Agent"]
-        LLM["AI Agent (Antigravity / Claude / Gemini)"]
-    end
-
-    subgraph MCP ["Vision Control MCP Server"]
-        Router["FastMCP Tool Router (20 Tools)"]
-        LoopEngine["Feedback & Verification Controller"]
-
-        subgraph GroundingEngine ["Pluggable Grounding Engine"]
-            Ensemble["Ensemble Provider (NMS / IoU Fusion)"]
-            Semantic["Semantic Provider (AT-SPI2 / D-Bus)"]
-            CV["Pure CV Provider (Canny / MSER)"]
-            Template["Template Matcher (OpenCV)"]
-            Hotswap["Strategy Hotswap Coordinator"]
-        end
-
-        subgraph Perception ["Perception & Token Optimization"]
-            CapPipe["Screen Capture Pipeline (mss)"]
-            CursorDraw["Virtual Pointer Overlay"]
-            SoMGen["Set-of-Marks (SoM) Generator"]
-            TokenOpt["Token Optimizer (Delta Patch / ROI)"]
-        end
-
-        subgraph HAL ["Hardware Abstraction Layer (HAL)"]
-            HALFactory["HAL Factory"]
-            LinuxHAL["LinuxHAL (X11 / Wayland)"]
-            WinHAL["WindowsHAL (DXGI / SendInput)"]
-        end
-    end
-
-    subgraph Desktop ["Operating System & Workspace"]
-        X11["X11 Display Server (:0 / :20)"]
-        WaylandPortal["Wayland Compositor / Portal"]
-        ATSPIDBus["AT-SPI2 D-Bus Registry"]
-        Apps["Browser, Terminal, IDE, Desktop Apps"]
-    end
-
-    LLM <-->|"MCP JSON-RPC (stdio / SSE)"| Router
-    Router --> LoopEngine
-    LoopEngine --> GroundingEngine
-    LoopEngine --> Perception
-    LoopEngine --> HALFactory
-
-    GroundingEngine --> Ensemble
-    Ensemble --> Semantic
-    Ensemble --> CV
-    Ensemble --> Template
-
-    HALFactory --> LinuxHAL
-    HALFactory --> WinHAL
-
-    LinuxHAL --> X11
-    LinuxHAL --> WaylandPortal
-    Semantic --> ATSPIDBus
-    X11 & WaylandPortal & ATSPIDBus --> Apps
-```
+- **Screen Perception**: Capture full screens, specific application windows, or named sub-panes (e.g. waveform viewers, address bars). Optional Set-of-Marks (SoM) visual badge overlays.
+- **Input Automation**: Mouse clicking, dragging, scrolling, text typing with cadence, single key presses, and multi-key shortcuts.
+- **UI Element Detection**: Finds interactive elements using OS accessibility trees (AT-SPI2 / D-Bus), a lightweight local ONNX detector (sub-10ms), or visual template matching.
+- **Self-Healing Locator Cache**: Remembers element locations across runs, verifies them with visual hashing (<0.5ms), and automatically adjusts for window movement or slight layout drift.
+- **Local Trajectory Execution**: Batches multi-step sequences (`execute_trajectory`) locally at native OS speeds without needing model round-trips for every action.
+- **Application Plugins**: Pre-configured support for dense applications such as AMD Vivado 2025.1 and Google Chrome, with extensible interfaces for custom tools.
+- **GUI-to-Script Crystallization**: Correlates physical UI interactions with application journals (e.g. Vivado `.jou`) to compile repetitive workflows into parameterized scripts.
+- **Event-Driven Quiescence**: Uses X11 damage events (`XDamage`) to wait for screen rendering to settle before taking action, avoiding fixed sleep timers.
 
 ---
 
-## 3. Tool Catalog (27 MCP Tools)
+## Installation
 
-| Tool Name | Parameters | Description |
-| :--- | :--- | :--- |
-| `take_screenshot` | `mode`, `app_filter`, `region`, `window_id`, `clip_to_active_window`, `strategy_override` | Captures screen with optional Set-of-Marks and window clipping. |
-| `capture_window` | `window_id`, `title_filter`, `mode` | **Window-Clipping Perception:** Clips strictly to active or target window (60-80% token reduction). |
-| `capture_pane` | `pane_name`, `window_id`, `title_filter`, `mode` | **Sub-Pane Perception:** Clips strictly to a named functional zone (e.g. `address_bar`, `tab_strip`, `content_area`), reducing tokens by up to 90%. |
-| `list_plugins` | None | Lists registered application plugins (Chrome, Vivado, etc.) and active foreground plugin. |
-| `list_plugin_features` | `plugin_id` | Returns declarative capabilities, hotkeys, and sub-panes for a plugin. |
-| `invoke_plugin_feature` | `feature_id`, `plugin_id`, `args` | Executes high-level capabilities natively with closed-loop delta verification. |
-| `dismiss_obstructions`| `max_attempts` | **Autonomous Defense:** Auto-dismisses modal popups, cookie banners, and permission requests. |
-| `manage_cache` | `action`, `app_key`, `query` | Manages Self-Healing Action Cache (`stats`, `invalidate`, `clear`). |
-| `get_accessibility_tree` | `app_name_filter`, `max_depth`, `filter_interactable` | Queries AT-SPI2 for semantic widget hierarchy, roles, and screen bounding boxes. |
-| `find_element` | `query`, `role`, `fuzzy`, `strategy` | **Zero-Token Search:** Resolves element physical coordinates by label/role without image tokens. |
-| `click` | `mark_id`, `x`, `y`, `query`, `button`, `click_count`, `verify_delta` | Clicks either a mark badge, query match, or coordinates with automated verification. |
-| `click_and_type` | `text`, `query`, `mark_id`, `x`, `y`, `clear_first`, `press_enter`, `delay_ms` | **Compound Action:** Focuses target, clears content, types text, and presses Enter. |
-| `find_and_click` | `query`, `button`, `click_count`, `verify_delta` | Autonomous one-shot find-by-text and click with verified visual delta and cached replay. |
-| `move_cursor` | `x`, `y` | Moves pointer to absolute desktop coordinates without clicking. |
-| `drag_and_drop` | `start_x`, `start_y`, `end_x`, `end_y`, `duration_sec`, `verify_delta` | Performs smooth mouse drag from start coordinates to end coordinates. |
-| `scroll` | `direction` (`up`/`down`/`left`/`right`), `amount`, `verify_delta` | Emulates mouse wheel scrolling at current cursor position. |
-| `scroll_until_visible`| `query`, `direction`, `max_scrolls`, `scroll_amount` | Iteratively scrolls viewport until target element or text becomes visible. |
-| `type_text` | `text`, `press_enter`, `delay_ms`, `verify_delta` | Types text into the focused UI element with human-like cadence. |
-| `press_key` | `key`, `verify_delta` | Presses and releases a single key (`enter`, `tab`, `escape`, `backspace`, etc.). |
-| `hotkey` | `combo` (`ctrl+c`, `ctrl+a`, `alt+tab`), `verify_delta` | Sends keyboard chords with automatic release sequencing. |
-| `list_windows` | None | Lists open windows with window IDs, titles, bounding boxes, and active focus. |
-| `get_active_window` | None | Returns metadata for the currently focused desktop window. |
-| `focus_window` | `window_id` | Brings requested window to the foreground and grants input focus. |
-| `configure_vision` | `setting`, `value` | Dynamically hotswaps runtime settings (`grounding_strategy`, cache toggles, etc.). |
-| `get_vision_diagnostics`| None | Reports system health, display server, screen bounds, and active grounding engine. |
-| `run_terminal_command`| `command`, `timeout_seconds` | Runs headless shell command for hybrid CLI + GUI navigation. |
-| `wait_for_ui_change` | `timeout_seconds`, `poll_interval_sec`, `min_delta_ratio` | Blocks until visual change is detected (e.g. waiting for page load). |
+### Prerequisites
 
----
+- **Python**: 3.10 or higher
+- **Linux**: X11 or Wayland (with `xwayland` / portal support)
+- **Windows**: Windows 10/11 (supported via Win32 / UIA HAL)
 
-## 4. Test Suite Execution
+### Setup
 
 ```bash
-cd /home/mk/DV/git/Vision
-.venv/bin/pytest -v
+# Clone the repository
+git clone https://github.com/<your-org>/desktop-control.git
+cd desktop-control
+
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install in editable mode
+pip install -e .
 ```
 
-All 38 unit and integration tests validate the grounding engine, NMS fusion, template matching, token optimization, Linux window management, compound tools, Per-Window Perception, Self-Healing Action Cache, Obstruction Interception, and Phase 2 UI Application Plugins (ChromeBrowserPlugin, VivadoPlugin, SubPaneROI, FeatureDescriptor, and PluginRegistry).
+To run the test suite:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/
+```
 
 ---
 
-## 5. Research Library & Upstream Code References
+## MCP Client Configuration
 
-* **Obsidian-Style Research Library (`research/`)**: Master index at `research/INDEX.md` covering multimodal grounding comparisons (OmniParser, UI-TARS, Browser-Use, Stagehand), token dynamics, and future UI plugin architectures.
-* **Operational Learnings Runbook (`learnings/`)**: Master index at `learnings/INDEX.md` detailing X11 window management fixes, zero-token element discovery patterns, browser recipes, and visual delta calibration.
-* **Upstream Reference MCP Implementations (`references/`)**: Master guide at `references/README.md` containing full source code and deep architectural analyses of:
-  * **Microsoft Playwright MCP (`references/playwright-mcp/`)**: Accessibility snapshots, locator generation, verification primitives, and trace capture.
-  * **Google Chrome DevTools MCP (`references/chrome-devtools-mcp/`)**: Puppeteer CDP bridges, `SlimMcpResponse`, token-optimized semantic summaries, memory/trace profiling, and WebMCP/3P tool extensions.
+Add `desktop-control` to your MCP client configuration file:
+
+### Claude Desktop (`~/.config/Claude/claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "desktop-control": {
+      "command": "/path/to/desktop-control/.venv/bin/desktop-control",
+      "env": {
+        "DISPLAY": ":0"
+      }
+    }
+  }
+}
+```
+
+### Antigravity / Gemini CLI (`~/.gemini/antigravity-cli/mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "desktop-control": {
+      "command": "/path/to/desktop-control/.venv/bin/desktop-control",
+      "env": {
+        "DISPLAY": ":20"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Available Tools (37 Tools)
+
+### Screen Perception & Window Management
+| Tool | Description |
+| :--- | :--- |
+| `take_screenshot` | Captures the screen with optional Set-of-Marks labels and window clipping. |
+| `capture_window` | Captures only the target or active window, reducing image size. |
+| `capture_pane` | Captures a named functional zone (e.g., `waveform_canvas`, `tcl_console`). |
+| `list_windows` | Lists open desktop windows with IDs, titles, and bounding boxes. |
+| `get_active_window` | Returns information about the currently focused window. |
+| `focus_window` | Brings a window to the foreground by ID or title. |
+| `wait_for_ui_change` | Waits until a visual change occurs on screen. |
+
+### Mouse & Keyboard Input
+| Tool | Description |
+| :--- | :--- |
+| `click` | Clicks at coordinates, on a mark ID, or by element label. |
+| `click_and_type` | Focuses an element, clears existing text, types new text, and submits. |
+| `type_text` | Types text into the focused element with adjustable typing speed. |
+| `press_key` | Presses and releases a single key (e.g., `enter`, `escape`, `tab`, `f5`). |
+| `hotkey` | Sends a key combination (e.g., `ctrl+c`, `alt+tab`, `ctrl+f5`). |
+| `move_cursor` | Moves the mouse pointer to coordinates. |
+| `drag_and_drop` | Drags the mouse from start coordinates to end coordinates. |
+| `scroll` | Scrolls the mouse wheel horizontally or vertically. |
+| `scroll_until_visible` | Scrolls until a target element or text becomes visible. |
+
+### UI Element Grounding & vDOM
+| Tool | Description |
+| :--- | :--- |
+| `find_element` | Finds an element's screen coordinates by text label or accessible role. |
+| `find_and_click` | Finds an element by label and clicks it in a single step. |
+| `get_accessibility_tree` | Retrieves the accessibility tree (AT-SPI2) for open applications. |
+| `capture_vdom` | Fuses accessibility and visual elements into an indexed virtual DOM. |
+| `query_vdom` | Queries the virtual DOM using CSS-style selectors (e.g., `push_button`, `tab_item`). |
+
+### Trajectories, Macros & Script Crystallization
+| Tool | Description |
+| :--- | :--- |
+| `execute_trajectory` | Executes a declarative multi-step action sequence locally at native speed. |
+| `start_skill_recording` | Starts recording physical actions alongside application journal streams. |
+| `stop_skill_recording` | Stops recording and correlates actions with journal commands. |
+| `crystallize_skill` | Compiles recorded interactions into a parameterized script template. |
+| `execute_crystallized_skill` | Executes a saved parameterized script directly through the application CLI. |
+| `list_crystallized_skills` | Lists all saved crystallized skills. |
+| `delete_crystallized_skill` | Deletes a saved skill. |
+
+### Plugins & Utilities
+| Tool | Description |
+| :--- | :--- |
+| `list_plugins` | Lists available application plugins (e.g., Vivado, Chrome). |
+| `list_plugin_features` | Lists capabilities and sub-panes for a specific plugin. |
+| `invoke_plugin_feature` | Runs a named plugin action (e.g., `vivado.zoom_fit`, `vivado.run_for`). |
+| `dismiss_obstructions` | Dismisses modal popups, update prompts, and screensavers. |
+| `resolve_modal_dialog` | Classifies and resolves confirmation or alert dialogs. |
+| `manage_cache` | Inspects, verifies, or clears the self-healing locator cache. |
+| `configure_vision` | Changes runtime settings (grounding strategy, cache toggles). |
+| `get_vision_diagnostics` | Returns system diagnostics, screen resolution, and active window. |
+| `run_terminal_command` | Executes a shell command and returns output and exit code. |
+
+---
+
+## Directory Structure
+
+```
+desktop-control/
+├── vision_mcp/             # Main Python package
+│   ├── hal/                # Hardware Abstraction Layer (Linux X11/Wayland, Windows)
+│   ├── perception/         # Screen capture, AT-SPI2, Set-of-Marks, token optimizer
+│   ├── vdom/               # Fast ONNX detector, virtual DOM fusion, layout solver
+│   ├── agent_loop/         # Controller, action cache, obstruction handler, trajectory engine
+│   ├── crystallization/    # GUI-to-script compiler and skill registry
+│   ├── plugins/            # Application plugins (Vivado, Chrome, base plugin)
+│   ├── models/             # Bundled Fast-Path ONNX UI detector (159 KB)
+│   ├── server.py           # FastMCP server and tool registrations
+│   ├── config.py           # Settings and environment variable handling
+│   └── types.py            # Pydantic data models and schemas
+│
+├── docs/                   # Documentation and runbooks
+│   ├── setup.md            # Installation and client configuration guide
+│   ├── tools.md            # Detailed tool reference with parameters and examples
+│   ├── architecture.md     # System architecture and design principles
+│   └── plugins/            # Plugin documentation (Vivado, custom plugins)
+│
+├── examples/               # Demonstrations and example scripts
+│   ├── live_trajectory_vivado.py  # End-to-end Vivado simulation trajectory
+│   └── dashboard.html             # Test fixture for browser interactions
+│
+├── tests/                  # Test suite (89 unit and integration tests)
+├── pyproject.toml          # Build configuration and dependencies
+├── requirements.txt        # Pinned dependencies
+├── LICENSE                 # License file
+└── README.md
+```
+
+---
+
+## Testing
+
+Run the full test suite with `pytest`:
+
+```bash
+.venv/bin/pytest tests/
+```
+
+All 89 tests cover HAL window management, quiescence monitoring, grounding strategies, modal triage, crystallization, self-healing cache, vDOM layout solvers, and trajectory execution.
+
+---
+
+## License
+
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.

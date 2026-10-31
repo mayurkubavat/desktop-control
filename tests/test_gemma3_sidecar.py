@@ -3,12 +3,14 @@ Tests for Local Gemma 3 Multimodal Sidecar and Perceptual dHash Cache.
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 from PIL import Image, ImageDraw
 
+from vision_mcp.gemma.client import GemmaClient, GemmaError, normalize_base_url
 from vision_mcp.types import (
     BoundingBox,
+    ModalRiskTier,
     GroundingSource,
     UIRole,
     VDOMNode,
@@ -74,88 +76,141 @@ def test_semantic_roi_cache():
     assert cache.get("anchor_a:intent_1", h1) is None
 
 
-def test_gemma3_grounder_mocked_http():
-    grounder = Gemma3Grounder(endpoint="http://127.0.0.1:11434/api/generate", timeout=5.0)
+class FakeOllama:
+    """Fake transport for GemmaClient: serves /api/tags and canned /api/chat replies."""
 
-    mock_ollama_response = {
-        "response": json.dumps({
-            "elements": [
-                {
-                    "box_2d": [100, 200, 500, 600],
-                    "role": "icon_button",
-                    "label": "Zoom Fit",
-                    "confidence": 0.96,
-                },
-                {
-                    "box_2d": [600, 100, 900, 800],
-                    "role": "waveform_signal",
-                    "label": "clk_250m",
-                    "confidence": 0.91,
-                },
-            ]
-        })
-    }
+    def __init__(self, replies=None, models=("gemma3:4b", "gemma3:12b"), fail=None):
+        self.replies = list(replies or [])
+        self.models = list(models)
+        self.fail = fail
+        self.chat_calls = []
 
+    def __call__(self, method, url, body, timeout):
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": m} for m in self.models]}
+        assert url.endswith("/api/chat"), url
+        self.chat_calls.append(body)
+        if self.fail is not None:
+            raise self.fail
+        reply = self.replies.pop(0)
+        content = reply if isinstance(reply, str) else json.dumps(reply)
+        return {"message": {"role": "assistant", "content": content}}
+
+
+def _grounder(fake, **kw):
+    return Gemma3Grounder(client=GemmaClient(transport=fake), **kw)
+
+
+def test_gemma3_grounder_schema_call_and_cache():
+    fake = FakeOllama(replies=[{
+        "elements": [
+            {"box_2d": [100, 200, 500, 600], "role": "icon_button", "label": "Zoom Fit", "confidence": 0.96},
+            {"box_2d": [600, 100, 900, 800], "role": "waveform_signal", "label": "clk_250m", "confidence": 0.91},
+        ]
+    }])
+    grounder = _grounder(fake)
     img = _create_sample_image()
 
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(mock_ollama_response).encode("utf-8")
-        mock_resp.status = 200
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
+    proposals = grounder.ground_roi(image=img, offset=(50, 100), anchor_id="waveform_canvas", task_intent="find_zoom_fit")
 
-        proposals = grounder.ground_roi(
-            image=img,
-            offset=(50, 100),
-            anchor_id="waveform_canvas",
-            task_intent="find_zoom_fit",
-        )
+    assert len(proposals) == 2
+    # box_2d [100, 200, 500, 600] on a 200x100 crop -> rel (40, 10, 80, 40), plus offset (50, 100)
+    p1 = proposals[0]
+    assert (p1["bbox"]["x"], p1["bbox"]["y"], p1["bbox"]["width"], p1["bbox"]["height"]) == (90, 110, 80, 40)
+    assert p1["class_name"] == "icon_button"
+    assert p1["text"] == "Zoom Fit"
 
-        assert len(proposals) == 2
-        # First element: box_2d [100, 200, 500, 600] on 200x100 img:
-        # rel_x = 200 * 200 / 1000 = 40; rel_y = 100 * 100 / 1000 = 10;
-        # rel_w = (600 - 200) * 200 / 1000 = 80; rel_h = (500 - 100) * 100 / 1000 = 40
-        # abs_x = 50 + 40 = 90; abs_y = 100 + 10 = 110
-        p1 = proposals[0]
-        assert p1["bbox"]["x"] == 90
-        assert p1["bbox"]["y"] == 110
-        assert p1["bbox"]["width"] == 80
-        assert p1["bbox"]["height"] == 40
-        assert p1["class_name"] == "icon_button"
-        assert p1["text"] == "Zoom Fit"
+    body = fake.chat_calls[0]
+    assert body["model"] == "gemma3:4b"
+    assert body["format"]["required"] == ["elements"]  # a JSON schema, not just "json"
+    assert body["messages"][1]["images"]
 
-        # Subsequent call with same image and anchor must hit cache with zero HTTP calls
-        mock_urlopen.reset_mock()
-        cached_proposals = grounder.ground_roi(
-            image=img,
-            offset=(50, 100),
-            anchor_id="waveform_canvas",
-            task_intent="find_zoom_fit",
-        )
-        assert len(cached_proposals) == 2
-        mock_urlopen.assert_not_called()
+    # Same crop again: served from the dHash cache with no Gemma call
+    again = grounder.ground_roi(image=img, offset=(50, 100), anchor_id="waveform_canvas", task_intent="find_zoom_fit")
+    assert len(again) == 2
+    assert len(fake.chat_calls) == 1
+    assert grounder.diagnostics()["roi_cache_hits"] == 1
 
 
-def test_gemma3_modal_classification():
-    grounder = Gemma3Grounder()
-    mock_modal_response = {
-        "response": json.dumps({
-            "risk_level": "DESTRUCTIVE",
-            "default_action": "Cancel",
-            "confidence": 0.98,
-            "reason": "Dialog prompts to reset simulation dropping all recorded waveforms.",
-        })
-    }
+def test_gemma3_grounder_returns_empty_on_failure():
+    fake = FakeOllama(fail=TimeoutError("timed out"))
+    grounder = _grounder(fake)
+    assert grounder.ground_roi(_create_sample_image()) == []
+    stats = grounder.diagnostics()
+    assert stats["errors"] == 1 and "timed out" in stats["last_error"]
 
-    with patch("urllib.request.urlopen") as mock_urlopen:
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(mock_modal_response).encode("utf-8")
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
 
-        result = grounder.classify_modal("Reset simulation and discard unsaved waveforms?")
-        assert result["risk_level"] == "DESTRUCTIVE"
-        assert result["default_action"] == "Cancel"
-        assert result["confidence"] == 0.98
+def test_gemma3_modal_classification_aligned_tiers():
+    fake = FakeOllama(replies=[{
+        "risk_tier": "INFORMATIVE_ACK",
+        "suggested_button": "ok",
+        "confidence": 0.9,
+        "reason": "Synthesis finished notice.",
+    }])
+    grounder = _grounder(fake)
+    result = grounder.classify_modal("Synthesis completed successfully.", button_labels=["OK"])
+    assert result["risk_tier"] == ModalRiskTier.INFORMATIVE_ACK.value
+    assert result["suggested_button"] == "OK"  # normalized to the real label
+    assert result["source"] == "gemma"
+    assert fake.chat_calls[0]["format"]["properties"]["risk_tier"]["enum"] == [t.value for t in ModalRiskTier]
+
+
+def test_gemma3_modal_destructive_never_suggests_button():
+    fake = FakeOllama(replies=[{
+        "risk_tier": "DESTRUCTIVE_OR_SYSTEM",
+        "suggested_button": "Discard",
+        "confidence": 0.98,
+        "reason": "Drops waveforms.",
+    }])
+    result = _grounder(fake).classify_modal("Reset simulation and discard waveforms?", button_labels=["Discard", "Cancel"])
+    assert result["risk_tier"] == ModalRiskTier.DESTRUCTIVE_OR_SYSTEM.value
+    assert result["suggested_button"] is None
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        FakeOllama(fail=OSError("connection refused")),
+        FakeOllama(replies=["not json"]),
+        FakeOllama(replies=[{"risk_tier": "PASSIVE_NOTIFICATION", "suggested_button": "OK", "confidence": 0.9, "reason": ""}]),
+        FakeOllama(replies=[{"risk_tier": "BENIGN_DISMISSIBLE", "suggested_button": "Delete All", "confidence": 0.9, "reason": ""}]),
+        FakeOllama(models=("gemma3:12b",)),  # configured model not installed
+    ],
+)
+def test_gemma3_modal_fails_closed(fake):
+    result = _grounder(fake).classify_modal("Some dialog", button_labels=["OK", "Cancel"])
+    assert result["risk_tier"] == ModalRiskTier.WORKFLOW_BRANCHING.value
+    assert result["suggested_button"] is None
+    assert result["source"] == "fallback"
+
+
+def test_gemma3_defaults_use_installed_model():
+    grounder = Gemma3Grounder(client=GemmaClient(transport=FakeOllama()))
+    assert grounder.text_model == "gemma3:4b"
+    assert grounder.is_available()
+    assert not Gemma3Grounder(client=GemmaClient(transport=FakeOllama(models=("gemma3:4b-x",)))).is_available()
+
+
+def test_gemma_client_url_normalization_and_stats():
+    assert normalize_base_url("http://127.0.0.1:11434/api/generate") == "http://127.0.0.1:11434"
+    assert normalize_base_url("http://host:11434/") == "http://host:11434"
+
+    fake = FakeOllama(replies=[{"ok": True}, "[1, 2]"])
+    client = GemmaClient(transport=fake, keep_alive="5m")
+    assert client.chat_json("gemma3:4b", "s", "u", {"type": "object"}) == {"ok": True}
+    assert fake.chat_calls[0]["keep_alive"] == "5m"
+    assert fake.chat_calls[0]["options"]["temperature"] == 0.0
+    with pytest.raises(GemmaError):
+        client.chat_json("gemma3:4b", "s", "u", {"type": "object"})  # array, not object
+    stats = client.stats()
+    assert stats["calls"] == 2 and stats["errors"] == 1
+    assert stats["per_model"]["gemma3:4b"]["calls"] == 2
+
+
+def test_gemma_client_untagged_model_matches_latest():
+    client = GemmaClient(transport=FakeOllama(models=("gemma3:latest",)))
+    assert client.has_model("gemma3")
+    assert not client.has_model("gemma3:4b")
 
 
 def test_gemma3_vdom_fusion():

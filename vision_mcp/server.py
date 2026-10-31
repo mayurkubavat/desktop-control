@@ -551,8 +551,19 @@ def get_vision_diagnostics() -> Dict[str, Any]:
         supported_grounding_providers=controller.grounding_engine.list_strategies(),
         active_window=active_win.title if active_win else None,
         config_summary=CONFIG.model_dump(),
+        gemma=_gemma_diagnostics(),
     )
     return diag.model_dump()
+
+
+def _gemma_diagnostics() -> Optional[Dict[str, Any]]:
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if grounder is None:
+        return None
+    try:
+        return grounder.diagnostics()
+    except Exception as e:  # diagnostics must never fail the health check
+        return {"error": str(e)}
 
 
 @mcp_server.tool()

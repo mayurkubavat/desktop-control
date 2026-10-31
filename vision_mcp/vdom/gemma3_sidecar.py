@@ -1,27 +1,30 @@
 """
 Local Gemma 3 Multimodal Sidecar Plugin for Phase 4 Grounding and Modal Triage.
 
-Integrates local Google Gemma 3 models (Gemma 3 4B-IT multimodal for visual sub-panes
-and Gemma 3 1B-IT for text modal risk triage) with perceptual dHash caching (<0.2ms hits)
-and zero cloud token overhead.
+Integrates local Google Gemma 3 models served by Ollama (gemma3:4b by default for both
+vision sub-panes and text modal triage) with perceptual dHash caching and zero cloud
+token overhead. Replies are constrained to JSON schemas via vision_mcp.gemma.client.
 """
 
 from __future__ import annotations
 
-import base64
-import io
-import json
 import logging
 import time
-import urllib.request
-import urllib.error
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 from PIL import Image
 import numpy as np
 
 from vision_mcp.config import CONFIG
-from vision_mcp.types import BoundingBox, GroundingSource, UIRole, VDOMNode, VirtualDOMSnapshot
+from vision_mcp.gemma.client import GemmaClient, GemmaError, encode_image
+from vision_mcp.types import (
+    BoundingBox,
+    GroundingSource,
+    ModalRiskTier,
+    UIRole,
+    VDOMNode,
+    VirtualDOMSnapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +98,71 @@ class SemanticROICache:
         return len(self._entries)
 
 
+_GROUND_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "elements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "box_2d": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0, "maximum": 1000},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                    "role": {
+                        "type": "string",
+                        "enum": [
+                            "icon_button",
+                            "push_button",
+                            "text_input",
+                            "dropdown",
+                            "waveform_signal",
+                            "schematic_pin",
+                        ],
+                    },
+                    "label": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": ["box_2d", "role", "label", "confidence"],
+            },
+        }
+    },
+    "required": ["elements"],
+}
+
+_MODAL_TIERS = [t.value for t in ModalRiskTier]
+
+_MODAL_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "risk_tier": {"type": "string", "enum": _MODAL_TIERS},
+        "suggested_button": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"type": "string"},
+    },
+    "required": ["risk_tier", "suggested_button", "confidence", "reason"],
+}
+
+
+def _escalate(reason: str) -> Dict[str, Any]:
+    """Fail-closed modal verdict: never auto-click, hand the choice to the planner."""
+    return {
+        "risk_tier": ModalRiskTier.WORKFLOW_BRANCHING.value,
+        "suggested_button": None,
+        "confidence": 0.0,
+        "reason": reason,
+        "source": "fallback",
+    }
+
+
 class Gemma3Grounder:
     """
-    On-demand Local Neural Sidecar client for Google Gemma 3 via Ollama.
-    Supports multimodal spatial grounding (4B) and rapid text modal triage (1B).
+    On-demand local Gemma 3 sidecar (via Ollama) for sub-pane grounding and
+    modal triage. All calls go through :class:`GemmaClient`, which constrains
+    replies to a JSON schema and records call counts and latency.
     """
 
     def __init__(
@@ -109,27 +173,35 @@ class Gemma3Grounder:
         dhash_threshold: int = CONFIG.gemma3_dhash_threshold,
         cache_capacity: int = CONFIG.gemma3_cache_capacity,
         timeout: float = CONFIG.gemma3_timeout_seconds,
+        client: Optional[GemmaClient] = None,
     ) -> None:
-        self.endpoint = endpoint
+        self.client = client or GemmaClient(
+            base_url=endpoint,
+            timeout=timeout,
+            keep_alive=CONFIG.gemma3_keep_alive,
+        )
+        self.endpoint = self.client.base_url
         self.vision_model = vision_model
         self.text_model = text_model
         self.timeout = timeout
         self.cache = SemanticROICache(capacity=cache_capacity, threshold=dhash_threshold)
+        self.cache_hits = 0
 
     def is_available(self) -> bool:
-        """Checks if the local Gemma 3 Ollama endpoint is reachable and responsive."""
-        try:
-            # Query /api/tags or version
-            base_url = self.endpoint.rsplit("/api/", 1)[0]
-            req = urllib.request.Request(f"{base_url}/api/tags", headers={"User-Agent": "VisionControlMCP"})
-            with urllib.request.urlopen(req, timeout=1.5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    models = [m.get("name", "") for m in data.get("models", [])]
-                    return any(self.vision_model in m or self.text_model in m for m in models)
-        except Exception:
-            return False
-        return False
+        """True when Ollama is reachable and both configured models are installed (exact names)."""
+        return self.client.has_models({self.vision_model, self.text_model})
+
+    def diagnostics(self) -> Dict[str, Any]:
+        installed = self.client.installed_models()
+        return {
+            "vision_model": self.vision_model,
+            "text_model": self.text_model,
+            "available": self.is_available(),
+            "installed_models": sorted(installed),
+            "roi_cache_entries": len(self.cache),
+            "roi_cache_hits": self.cache_hits,
+            **self.client.stats(),
+        }
 
     def ground_roi(
         self,
@@ -139,194 +211,174 @@ class Gemma3Grounder:
         task_intent: str = "ground_ui",
     ) -> List[Dict[str, Any]]:
         """
-        Grounds UI elements, buttons, and schematic/waveform features inside an ROI crop.
-        Returns normalized bounding boxes converted to absolute screen coordinates.
+        Grounds UI elements inside an ROI crop and returns proposals in absolute
+        screen coordinates. Returns [] on any Gemma failure so callers fall back
+        to the CV/ONNX proposals.
         """
         ox, oy = offset
         w, h = image.size
         if w < 10 or h < 10:
             return []
 
-        # 1. Compute dHash and check perceptual cache (< 0.6ms)
         img_dhash = compute_dhash(image)
         cache_key = f"{anchor_id}:{task_intent}"
         cached = self.cache.get(cache_key, img_dhash)
         if cached is not None:
-            # Shift cached relative coordinates by current offset
-            translated: List[Dict[str, Any]] = []
-            for item in cached:
-                rel_box = item["rel_box"]
-                translated.append({
+            self.cache_hits += 1
+            return [
+                {
                     "bbox": {
-                        "x": ox + rel_box["x"],
-                        "y": oy + rel_box["y"],
-                        "width": rel_box["width"],
-                        "height": rel_box["height"],
+                        "x": ox + item["rel_box"]["x"],
+                        "y": oy + item["rel_box"]["y"],
+                        "width": item["rel_box"]["width"],
+                        "height": item["rel_box"]["height"],
                     },
                     "confidence": item["confidence"],
                     "class_name": item["class_name"],
                     "text": item.get("text", ""),
                     "source": GroundingSource.VISION_ONLY.value,
-                })
-            return translated
+                }
+                for item in cached
+            ]
 
-        # 2. Encode ROI crop to fast high-quality JPEG (< 0.7ms)
-        buf = io.BytesIO()
-        image.convert("RGB").save(buf, format="JPEG", quality=92)
-        b64_image = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        # 3. Build structured prompt with coordinate schema
         system_prompt = (
-            "You are a precision UI visual grounding engine operating on a cropped desktop region.\n"
+            "You are a UI grounding engine operating on a cropped desktop region.\n"
             "Identify interactive UI elements (buttons, inputs, dropdowns, icons, waveform signals, schematic pins).\n"
-            "Output strictly valid JSON with this schema:\n"
-            "{\n"
-            '  "elements": [\n'
-            "    {\n"
-            '      "box_2d": [ymin, xmin, ymax, xmax],\n'
-            '      "role": "icon_button" | "push_button" | "text_input" | "dropdown" | "waveform_signal" | "schematic_pin",\n'
-            '      "label": "string",\n'
-            '      "confidence": float\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "Coordinates MUST be normalized integers [ymin, xmin, ymax, xmax] from 0 to 1000 relative to the image."
+            "box_2d is [ymin, xmin, ymax, xmax] as integers from 0 to 1000 relative to the image."
         )
+        user_prompt = f"Ground the interactive targets in this '{anchor_id}' crop for '{task_intent}'."
 
-        user_prompt = f"Detect and ground all UI elements and interactive targets in this '{anchor_id}' crop for '{task_intent}'."
-
-        payload = {
-            "model": self.vision_model,
-            "system": system_prompt,
-            "prompt": user_prompt,
-            "images": [b64_image],
-            "format": "json",
-            "stream": False,
-        }
+        try:
+            data = self.client.chat_json(
+                model=self.vision_model,
+                system=system_prompt,
+                user=user_prompt,
+                schema=_GROUND_SCHEMA,
+                images=[encode_image(image, quality=92)],
+                timeout=self.timeout,
+            )
+        except GemmaError as e:
+            logger.warning(f"Gemma 3 grounding failed: {e}")
+            return []
 
         proposals: List[Dict[str, Any]] = []
         raw_items_for_cache: List[Dict[str, Any]] = []
-
-        try:
-            req = urllib.request.Request(
-                self.endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-
-            response_text = result.get("response", "")
-            data = json.loads(response_text)
-            elements = data.get("elements", [])
-
-            for el in elements:
-                box_2d = el.get("box_2d")
-                if not box_2d or len(box_2d) != 4:
-                    continue
-
+        for el in data.get("elements", []) or []:
+            box_2d = el.get("box_2d") if isinstance(el, dict) else None
+            if not box_2d or len(box_2d) != 4:
+                continue
+            try:
                 ymin, xmin, ymax, xmax = [float(v) for v in box_2d]
-                # Clamp to 0..1000
-                ymin = max(0.0, min(1000.0, ymin))
-                xmin = max(0.0, min(1000.0, xmin))
-                ymax = max(ymin + 5.0, min(1000.0, ymax))
-                xmax = max(xmin + 5.0, min(1000.0, xmax))
+                conf = float(el.get("confidence", 0.5))
+            except (TypeError, ValueError):
+                continue
 
-                # Map normalized 0..1000 to pixel dimensions
-                rel_x = int(round(xmin * w / 1000.0))
-                rel_y = int(round(ymin * h / 1000.0))
-                rel_w = max(4, int(round((xmax - xmin) * w / 1000.0)))
-                rel_h = max(4, int(round((ymax - ymin) * h / 1000.0)))
+            ymin = max(0.0, min(1000.0, ymin))
+            xmin = max(0.0, min(1000.0, xmin))
+            ymax = max(ymin + 5.0, min(1000.0, ymax))
+            xmax = max(xmin + 5.0, min(1000.0, xmax))
 
-                role = el.get("role", "icon_button")
-                label = el.get("label", "")
-                conf = float(el.get("confidence", 0.90))
+            rel_x = int(round(xmin * w / 1000.0))
+            rel_y = int(round(ymin * h / 1000.0))
+            rel_w = max(4, int(round((xmax - xmin) * w / 1000.0)))
+            rel_h = max(4, int(round((ymax - ymin) * h / 1000.0)))
 
-                # Store relative item for cache
-                raw_items_for_cache.append({
-                    "rel_box": {"x": rel_x, "y": rel_y, "width": rel_w, "height": rel_h},
-                    "class_name": role,
-                    "text": label,
-                    "confidence": conf,
-                })
+            role = el.get("role", "icon_button")
+            label = el.get("label", "")
+            conf = max(0.0, min(1.0, conf))
 
-                proposals.append({
-                    "bbox": {
-                        "x": ox + rel_x,
-                        "y": oy + rel_y,
-                        "width": rel_w,
-                        "height": rel_h,
-                    },
-                    "confidence": conf,
-                    "class_name": role,
-                    "text": label,
-                    "source": GroundingSource.VISION_ONLY.value,
-                })
+            raw_items_for_cache.append({
+                "rel_box": {"x": rel_x, "y": rel_y, "width": rel_w, "height": rel_h},
+                "class_name": role,
+                "text": label,
+                "confidence": conf,
+            })
+            proposals.append({
+                "bbox": {"x": ox + rel_x, "y": oy + rel_y, "width": rel_w, "height": rel_h},
+                "confidence": conf,
+                "class_name": role,
+                "text": label,
+                "source": GroundingSource.VISION_ONLY.value,
+            })
 
-            # Store in cache
-            if raw_items_for_cache:
-                self.cache.put(cache_key, img_dhash, raw_items_for_cache)
-                logger.info(f"Gemma 3 grounded {len(proposals)} elements in '{anchor_id}' (cached with dHash {hex(img_dhash)})")
-
-        except Exception as e:
-            logger.warning(f"Gemma 3 grounding request failed: {e}")
-
+        if raw_items_for_cache:
+            self.cache.put(cache_key, img_dhash, raw_items_for_cache)
+            logger.info(f"Gemma 3 grounded {len(proposals)} elements in '{anchor_id}' (dHash {hex(img_dhash)})")
         return proposals
 
-    def classify_modal(self, modal_text: str, modal_image: Optional[Image.Image] = None) -> Dict[str, Any]:
+    def classify_modal(
+        self,
+        modal_text: str,
+        modal_image: Optional[Image.Image] = None,
+        button_labels: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
-        Classifies an intercepted modal dialog into the 4-tier risk taxonomy:
-        - PASSIVE_NOTIFICATION
-        - DISMISSIBLE_QUERY
-        - WORKFLOW_BRANCHING
-        - DESTRUCTIVE
+        Classifies a modal dialog into the same tiers as ``ModalRiskTier``.
 
-        Uses Gemma 3 1B-IT (fast text) or Gemma 3 4B-IT (if image provided).
+        Returns ``{risk_tier, suggested_button, confidence, reason, source}``.
+        Fails closed: on any error, unknown tier, or a suggested button that is
+        not one of ``button_labels``, the verdict is WORKFLOW_BRANCHING with no
+        button, so the dialog is escalated instead of clicked.
         """
         system_prompt = (
-            "You are a safety triage classifier for EDA software modal dialogs.\n"
-            "Classify the dialog into exactly one of four risk levels:\n"
-            "- PASSIVE_NOTIFICATION: Informational only, safe to dismiss (OK/Close).\n"
-            "- DISMISSIBLE_QUERY: Non-destructive question (e.g. Save log? Yes/No).\n"
-            "- WORKFLOW_BRANCHING: Alters synthesis/simulation flow or branch choice.\n"
-            "- DESTRUCTIVE: Overwrites files, deletes workspace, kills runs, drops changes.\n"
-            "Output strictly valid JSON with keys: risk_level, default_action, confidence, reason."
+            "You are a safety triage classifier for desktop and EDA software dialogs.\n"
+            "Classify the dialog into exactly one risk tier:\n"
+            "- BENIGN_DISMISSIBLE: tips, telemetry, cookie or update nags; safe to close.\n"
+            "- INFORMATIVE_ACK: a finished-task or status notice with a single acknowledge button.\n"
+            "- WORKFLOW_BRANCHING: a choice that changes what the workflow does next.\n"
+            "- DESTRUCTIVE_OR_SYSTEM: overwrites or deletes files, discards work, kills runs, license or system errors.\n"
+            "suggested_button must be copied exactly from the button list, or null. "
+            "Only suggest a button for BENIGN_DISMISSIBLE or INFORMATIVE_ACK. When unsure, use WORKFLOW_BRANCHING."
         )
+        buttons_line = ", ".join(f'"{b}"' for b in button_labels) if button_labels else "(unknown)"
+        user_prompt = f"Dialog text:\n{modal_text}\n\nButtons: {buttons_line}"
 
-        user_prompt = f"Analyze and classify this modal dialog:\n{modal_text}"
         model = self.text_model
-        payload: Dict[str, Any] = {
-            "model": model,
-            "system": system_prompt,
-            "prompt": user_prompt,
-            "format": "json",
-            "stream": False,
-        }
-
+        images = None
         if modal_image is not None:
-            buf = io.BytesIO()
-            modal_image.convert("RGB").save(buf, format="JPEG", quality=90)
-            payload["images"] = [base64.b64encode(buf.getvalue()).decode("utf-8")]
-            payload["model"] = self.vision_model
+            model = self.vision_model
+            images = [encode_image(modal_image, quality=90)]
 
         try:
-            req = urllib.request.Request(
-                self.endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+            data = self.client.chat_json(
+                model=model,
+                system=system_prompt,
+                user=user_prompt,
+                schema=_MODAL_SCHEMA,
+                images=images,
+                timeout=self.timeout,
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
-            parsed = json.loads(res.get("response", "{}"))
-            return parsed
-        except Exception as e:
+        except GemmaError as e:
             logger.warning(f"Modal classification with Gemma 3 failed: {e}")
-            return {
-                "risk_level": "DISMISSIBLE_QUERY",
-                "default_action": "Cancel",
-                "confidence": 0.5,
-                "reason": f"Fallback due to inference error: {e}",
-            }
+            return _escalate(f"Gemma unavailable: {e}")
+
+        tier = data.get("risk_tier")
+        if tier not in _MODAL_TIERS:
+            return _escalate(f"Gemma returned unknown tier {tier!r}")
+
+        try:
+            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        suggested = data.get("suggested_button")
+        safe_tiers = {ModalRiskTier.BENIGN_DISMISSIBLE.value, ModalRiskTier.INFORMATIVE_ACK.value}
+        if tier not in safe_tiers:
+            suggested = None
+        elif suggested is not None and button_labels is not None:
+            match = next((b for b in button_labels if b.strip().lower() == str(suggested).strip().lower()), None)
+            suggested = match
+        if tier in safe_tiers and suggested is None:
+            # A "safe" verdict with no usable button cannot be acted on: escalate.
+            return _escalate(f"Gemma said {tier} but named no valid button")
+
+        return {
+            "risk_tier": tier,
+            "suggested_button": suggested,
+            "confidence": confidence,
+            "reason": str(data.get("reason", "")),
+            "source": "gemma",
+        }
 
     def fuse_with_vdom(
         self,

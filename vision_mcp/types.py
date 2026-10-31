@@ -258,6 +258,10 @@ class DiagnosticsResult(BaseModel):
     supported_grounding_providers: List[str] = Field(description="List of registered grounding providers")
     active_window: Optional[str] = Field(default=None, description="Currently focused window title")
     config_summary: Dict[str, Any] = Field(description="Active configuration parameters")
+    gemma: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Local Gemma sidecar status: models, availability, call counts, latency, cache hits",
+    )
 
 
 class SubPaneROI(BaseModel):

@@ -107,16 +107,16 @@ class VisionConfig(BaseModel):
         description="Whether to enable on-demand Gemma 3 multimodal grounding for opaque sub-panes and modal triage.",
     )
     gemma3_endpoint: str = Field(
-        default="http://127.0.0.1:11434/api/generate",
-        description="Ollama API endpoint for local Gemma 3 inference.",
+        default="http://127.0.0.1:11434",
+        description="Ollama base URL for local Gemma 3 inference (a legacy .../api/generate URL is also accepted).",
     )
     gemma3_vision_model: str = Field(
         default="gemma3:4b",
         description="Model identifier for multimodal visual grounding (Gemma 3 4B-IT).",
     )
     gemma3_text_model: str = Field(
-        default="gemma3:1b",
-        description="Model identifier for lightweight text modal risk triage (Gemma 3 1B-IT).",
+        default="gemma3:4b",
+        description="Model identifier for text modal risk triage. gemma3:4b avoids loading a second model.",
     )
     gemma3_dhash_threshold: int = Field(
         default=4,
@@ -125,6 +125,10 @@ class VisionConfig(BaseModel):
     gemma3_cache_capacity: int = Field(
         default=256,
         description="Maximum entries in the local Gemma 3 semantic ROI cache.",
+    )
+    gemma3_keep_alive: str = Field(
+        default="10m",
+        description="How long Ollama keeps the Gemma model loaded after a call.",
     )
     gemma3_timeout_seconds: float = Field(
         default=25.0,

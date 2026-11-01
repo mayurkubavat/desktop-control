@@ -157,6 +157,9 @@ FAKE_HELPER = textwrap.dedent("""
         if msg.get("op") == "intent" and msg.get("text", "").startswith("EMIT:"):
             for name in msg["text"][5:].split(","):
                 print(json.dumps({"event": name}), flush=True)
+        if msg.get("op") == "sleep.wait" and msg.get("reason", "").startswith("EMIT:"):
+            for name in msg["reason"][5:].split(","):  # like a user click on the waiting bar
+                print(json.dumps({"event": name}), flush=True)
         if msg.get("op") == "confirm":
             print(json.dumps({"ack": msg["id"], "ok": msg["text"] == "yes?"}), flush=True)
             continue
@@ -479,6 +482,101 @@ def test_client_wake_and_sleep_events(fake_client):
     client.move(1, 1, ms=0)
     assert client.awake is False and woke == [True]
     client.checkpoint()  # waking does not stop or pause
+
+
+# ----------------------------------------------------------- wait_for_wake
+def test_wait_for_wake_returns_when_woken(fake_client):
+    client, log = fake_client
+    r = client.wait_for_wake(timeout_s=5, reason="EMIT:wake")
+    assert r["woken"] and not r["stopped"] and not r["timed_out"] and r["waited_s"] < 3
+    client.move(1, 1, ms=0)  # round trip: sleep.done has been written
+    assert _ops(log)[:2] == ["sleep.wait", "sleep.done"]
+    assert json.loads(log.read_text().splitlines()[0])["reason"] == "EMIT:wake"
+    client.checkpoint()  # waking does not stop
+
+
+def test_wait_for_wake_reports_stop_once(fake_client):
+    client, _ = fake_client
+    r = client.wait_for_wake(timeout_s=5, reason="EMIT:stop")
+    assert r["stopped"] and not r["woken"]
+    client.checkpoint()  # the Stop was reported by the wait, not again at the next step
+
+
+def test_wait_for_wake_times_out(fake_client):
+    client, log = fake_client
+    t0 = time.monotonic()
+    r = client.wait_for_wake(timeout_s=0.3)
+    assert r["timed_out"] and not r["woken"] and 0.25 < time.monotonic() - t0 < 2
+    client.move(1, 1, ms=0)
+    assert _ops(log)[:2] == ["sleep.wait", "sleep.done"]
+
+
+def test_wait_for_wake_ignores_an_earlier_wake(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:wake")
+    client.move(1, 1, ms=0)  # that wake has been read; nobody was waiting
+    assert client.wait_for_wake(timeout_s=0.3)["timed_out"]
+
+
+def test_wait_for_wake_reports_a_pending_stop_at_once(fake_client):
+    client, log = fake_client
+    client.intent("EMIT:stop")
+    client.move(1, 1, ms=0)
+    assert client.wait_for_wake(timeout_s=5)["stopped"]
+    assert "sleep.wait" not in _ops(log)
+    client.checkpoint()
+
+
+def test_wait_for_wake_clears_pause_and_takeover_on_wake(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:pause,user_input")
+    client.move(1, 1, ms=0)
+    assert client.wait_for_wake(timeout_s=5, reason="EMIT:wake")["woken"]
+    t0 = time.monotonic()
+    client.checkpoint(max_wait=2)  # neither blocked by the old pause nor skipped as interrupted
+    assert time.monotonic() - t0 < 0.5
+
+
+def test_wait_for_wake_can_be_cancelled(fake_client):
+    client, log = fake_client
+    import threading as _t
+    cancel = _t.Event()
+    _t.Timer(0.2, cancel.set).start()
+    r = client.wait_for_wake(timeout_s=10, cancel=cancel)
+    assert r.get("cancelled") and not r["woken"] and r["waited_s"] < 2
+    client.move(1, 1, ms=0)
+    assert "sleep.done" in _ops(log)
+
+
+def test_wait_for_wake_unavailable_without_helper(tmp_path):
+    client = OverlayClient(cmd=[str(tmp_path / "does-not-exist")])
+    assert client.wait_for_wake(timeout_s=5)["unavailable"] is True
+
+
+def test_wait_for_wake_is_thread_safe(fake_client):
+    client, _ = fake_client
+    import threading as _t
+    out = []
+    waiters = [_t.Thread(target=lambda: out.append(client.wait_for_wake(timeout_s=5))) for _ in range(2)]
+    for w in waiters:
+        w.start()
+    time.sleep(0.3)
+    client.intent("EMIT:wake")
+    for w in waiters:
+        w.join(5)
+    assert len(out) == 2 and all(r["woken"] for r in out)
+
+
+def test_null_overlay_wait_for_wake_returns_at_once():
+    r = NullOverlay().wait_for_wake(timeout_s=600)
+    assert r["woken"] is False and r["unavailable"] is True
+
+
+def test_sleep_wait_ops_validate():
+    assert p.decode('{"op": "sleep.wait", "reason": "done"}')["reason"] == "done"
+    assert p.decode('{"op": "sleep.done"}')
+    with pytest.raises(p.ProtocolError):
+        p.decode('{"op": "sleep.wait", "reason": 3}')
 
 
 def test_null_overlay_is_never_awake():

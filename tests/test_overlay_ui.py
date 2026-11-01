@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from dobby.overlay import geometry
-from dobby.overlay.menu import bar_click, bar_view, label_click, menu_entries, status_of
+from dobby.overlay.menu import bar_click, bar_tip, bar_view, label_click, menu_entries, status_of
 
 ARROW_W, ARROW_H, CHIP_H = 13 * 1.25, 21.5 * 1.25, 20.0
 
@@ -64,8 +64,14 @@ class TestBarStates:
 
 
 class TestBarAwake:
-    def test_awake_bar_is_ready_for_a_task(self):
-        assert view(awake=True) == ("awake", "Dobby is awake · ready for a task", "Pause", "Stop", "ok", 1.0)
+    def test_awake_without_a_waiting_ai_says_so(self):
+        v = view(awake=True)
+        assert v[0] == "awake" and v[1] == "Dobby is awake · no AI is waiting — ask your AI for a task"
+        assert v[2:] == ("Pause", "Stop", "ok", 1.0)
+
+    def test_awake_hands_back_to_a_waiting_ai(self):
+        assert view(awake=True, handoff=True)[:2] == ("awake", "Dobby is awake · handing back to the AI")
+        assert "handing back" in view(awake=True, handoff=True, turbo=True)[1]
 
     def test_sleeping_dot_stays_dimmed(self):
         v = view(awake=False)
@@ -81,6 +87,35 @@ class TestBarAwake:
     ])
     def test_awake_loses_to_other_states(self, kw, mode):
         assert view(awake=True, **kw)[0] == mode
+
+
+class TestBarAiWaiting:
+    def test_waiting_ai_bar_invites_a_click(self):
+        v = view(ai_waiting=True)
+        assert v[:2] == ("ready", "Dobby is sleeping · click to wake") and label_click(v[0]) == "wake"
+        assert "click to wake" in view(ai_waiting=True, turbo=True)[1]
+
+    def test_any_helper_shows_its_waiting_ai(self):
+        # the bar lock does not hide it: the click must reach this helper's AI
+        assert view(ai_waiting=True, owner=False)[0] == "ready"
+        assert view(ai_waiting=True, bar_mode="auto")[0] == "ready"
+
+    def test_owner_steps_aside_while_another_helpers_ai_waits(self):
+        assert view(other_waiting=True) is None
+        assert view(other_waiting=True, ai_waiting=True)[0] == "ready"
+        assert view(other_waiting=True, working=True)[0] == "working"
+
+    def test_wake_beats_waiting_and_other_states_beat_both(self):
+        assert view(ai_waiting=True, awake=True, handoff=True)[0] == "awake"
+        assert view(ai_waiting=True, paused=True)[0] == "paused"
+        assert view(ai_waiting=True, working=True)[0] == "working"
+
+    def test_tooltips(self):
+        assert bar_tip("ready") == "Click to wake Dobby"
+        assert bar_tip("ready", True) == "Click to wake Dobby: your AI is waiting for you"
+        assert bar_tip("ready", True, "report done") == "Click to wake Dobby: your AI is waiting for you (report done)"
+        assert bar_tip("awake") == "Click to put Dobby to sleep"
+        assert bar_tip("working", True) is None
 
 
 @pytest.mark.parametrize("mode,action", [

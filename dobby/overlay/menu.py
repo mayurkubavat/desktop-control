@@ -104,12 +104,19 @@ BarView = Tuple[str, str, str, str, str, float]
 
 
 def bar_view(*, paused: bool, takeover: bool, takeover_resume: str, working: bool, turbo: bool,
-             current_mode: str, bar_mode: str, owner: bool, awake: bool = False) -> Optional[BarView]:
+             current_mode: str, bar_mode: str, owner: bool, awake: bool = False,
+             ai_waiting: bool = False, handoff: bool = False,
+             other_waiting: bool = False) -> Optional[BarView]:
     """What the control bar shows, or None to hide it.
 
     Colour keys: "caution", "ok", or "risk" (the current risk colour).
     ``current_mode`` "stopped" is kept until the helper's timer clears it.
     ``awake``: the user woke Dobby from the bar; any helper shows it.
+    ``handoff``: that wake went to an AI waiting in ``wait_for_wake``;
+    otherwise no AI was waiting and the bar says so briefly.
+    ``ai_waiting``: this helper's AI waits for a wake; any helper shows it, so
+    the click reaches the AI that waits. ``other_waiting``: another helper's AI
+    waits, so the bar owner hides its plain idle bar instead of stacking on it.
     An Allow/Deny prompt is shown separately and is never hidden.
     """
     if paused:
@@ -123,9 +130,15 @@ def bar_view(*, paused: bool, takeover: bool, takeover_resume: str, working: boo
         label = "Dobby ⚡ Turbo" if turbo else "Dobby is working"
         return ("working", label + " · ⌃⌥⎋ stops", "Pause", "Stop", "risk", 1.0)
     if awake:
-        label = "Dobby ⚡ Turbo · awake" if turbo else "Dobby is awake · ready for a task"
+        if handoff:
+            label = "Dobby ⚡ Turbo · awake · handing back to the AI" if turbo else "Dobby is awake · handing back to the AI"
+        else:
+            label = "Dobby is awake · no AI is waiting — ask your AI for a task"
         return ("awake", label, "Pause", "Stop", "ok", 1.0)
-    if bar_mode == "always" and owner:
+    if ai_waiting:
+        label = "Dobby ⚡ Turbo · sleeping · click to wake" if turbo else "Dobby is sleeping · click to wake"
+        return ("ready", label, "Pause", "Stop", "ok", 0.45)
+    if bar_mode == "always" and owner and not other_waiting:
         label = "Dobby ⚡ Turbo · sleeping" if turbo else "Dobby is sleeping"
         return ("ready", label, "Pause", "Stop", "ok", 0.45)
     return None
@@ -144,6 +157,18 @@ def bar_click(mode: str, which: str) -> str:
     if mode in ("paused", "takeover"):
         return "resume"
     return "none"
+
+
+def bar_tip(mode: str, ai_waiting: bool = False, reason: str = "") -> Optional[str]:
+    """Tooltip for the bar itself (clicking it wakes Dobby or puts it to sleep)."""
+    if mode == "ready":
+        if not ai_waiting:
+            return "Click to wake Dobby"
+        tip = "Click to wake Dobby: your AI is waiting for you"
+        return tip + (f" ({_short(reason, 80)})" if reason.strip() else "")
+    if mode == "awake":
+        return "Click to put Dobby to sleep"
+    return None
 
 
 def label_click(mode: str) -> str:

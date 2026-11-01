@@ -272,6 +272,102 @@ def test_non_owner_helper_shows_awake(make):
     assert b.pill.mode == "awake" and b.pill.window.isVisible()
 
 
+# ------------------------------------------ an AI waits in wait_for_wake
+def test_ai_waiting_bar_invites_a_click(make):
+    c, _ = make()
+    _asleep(c)
+    c.handle({"op": "sleep.wait", "reason": "finished the report"})
+    assert c.pill.mode == "ready" and c.pill.label.stringValue() == "Dobby is sleeping · click to wake"
+    assert "finished the report" in c.pill.view.toolTip()
+    c.handle({"op": "sleep.done"})
+    assert c.pill.label.stringValue() == "Dobby is sleeping"
+    assert c.pill.view.toolTip() == "Click to wake Dobby"
+
+
+def test_label_click_without_waiting_ai_says_so_then_sleeps(make):
+    c, out = make(wake_note_secs=0.6)
+    _asleep(c)
+    c.on_pill_label()
+    assert c.pill.mode == "awake" and "no AI is waiting" in c.pill.label.stringValue()
+    assert c.awake_until - time.monotonic() <= 0.6  # not the 120 s awake time
+    assert _events(out) == ["wake"]
+    time.sleep(0.7)
+    c.on_tick()
+    assert c.pill.mode == "ready" and _events(out) == ["wake", "sleep"]
+
+
+def test_label_click_with_waiting_ai_hands_back(make):
+    c, out = make(wake_note_secs=0.6)
+    _asleep(c)
+    c.handle({"op": "sleep.wait"})
+    c.on_pill_label()
+    assert _events(out) == ["wake"]
+    assert c.pill.mode == "awake" and c.pill.label.stringValue() == "Dobby is awake · handing back to the AI"
+    assert c.awake_until - time.monotonic() > 60  # stays until the AI acts
+    c.handle({"op": "sleep.done"})  # wait_for_wake returned
+    assert c.pill.label.stringValue() == "Dobby is awake · handing back to the AI"
+    c._mark_active()  # the AI's next action
+    assert c.pill.mode == "working" and not c.handoff
+
+
+def test_waiting_again_ends_the_handoff(make):
+    c, _ = make()
+    _asleep(c)
+    c.handle({"op": "sleep.wait"})
+    c.on_pill_label()
+    c.handle({"op": "sleep.done"})
+    c.handle({"op": "sleep.wait"})  # the AI only answered in chat, then waits again
+    assert c.pill.mode == "ready" and "click to wake" in c.pill.label.stringValue()
+
+
+def test_wake_from_menu_while_paused_resumes_for_a_waiting_ai(make):
+    c, out = make()
+    _asleep(c)
+    c.handle({"op": "sleep.wait"})
+    c.set_paused(True)
+    menu = c._build_menu("Paused")
+    wake = next(menu.itemAtIndex_(i) for i in range(menu.numberOfItems())
+                if menu.itemAtIndex_(i).title() == "Wake Dobby")
+    c.target.menuWake_(wake)
+    assert not c.paused and _events(out) == ["pause", "resume", "wake"]
+    assert c.pill.mode == "awake"
+
+
+def test_non_owner_helper_shows_its_waiting_ai(make):
+    a, _ = make()
+    b, out = make()
+    assert not b.bar_owner.owned and not b.pill.window.isVisible()
+    b.last_action = time.monotonic() - 3600
+    b.handle({"op": "sleep.wait"})
+    assert b.pill.window.isVisible() and b.pill.mode == "ready"
+    b.on_pill_label()
+    assert _events(out) == ["wake"]
+    b.handle({"op": "sleep.done"})
+    b.awake_until = time.monotonic() - 1
+    b.on_tick()
+    assert not b.pill.window.isVisible()  # back to leaving the idle bar to the owner
+
+
+def test_owner_hides_its_idle_bar_while_another_ai_waits(make):
+    import os
+
+    from dobby.overlay.barlock import mark_waiting
+
+    a, _ = make()
+    _asleep(a)
+    assert a.pill.window.isVisible()
+    mark_waiting(a.wait_dir, os.getppid(), True)  # another (live) helper's AI waits
+    try:
+        a.others_checked = 0
+        a.on_tick()
+        assert not a.pill.window.isVisible()
+    finally:
+        mark_waiting(a.wait_dir, os.getppid(), False)
+    a.others_checked = 0
+    a.on_tick()
+    assert a.pill.window.isVisible() and a.pill.mode == "ready"
+
+
 # ------------------------------------------------- menu on the bar's ▾
 def test_no_menu_bar_icon_by_default(make):
     c, _ = make()

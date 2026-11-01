@@ -69,3 +69,7 @@ Another AI may drive the same desktop through its own Dobby. Only one agent clic
 ## 6. Report
 
 End with what was done, the verdict and tier of each critical step, anything left for the user, and how many screenshot images were used.
+
+## 7. Staying available
+
+If the user wants Dobby to stay available after a task, do not end the turn: report, then call `wait_for_wake(timeout_s, reason)`. The bar reads "Dobby is sleeping · click to wake" and does not hold desktop control. When it returns `woken`, ask for or continue with the user's next instruction and look at the screen again before acting; on `stopped`, stop; on `timed_out`, call it again or end the turn; on `unavailable` (overlay off), end the turn.

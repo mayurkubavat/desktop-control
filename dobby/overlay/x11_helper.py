@@ -49,7 +49,7 @@ import cairo  # noqa: E402
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from . import geometry, protocol  # noqa: E402
-from .barlock import BAR_LOCK, BarOwner  # noqa: E402
+from .barlock import BAR_LOCK, BarOwner, mark_waiting, others_waiting, waiting_dir  # noqa: E402
 from .menu import bar_click, bar_view, label_click  # noqa: E402
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -65,6 +65,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "turbo": False,
     "active_secs": 8.0,   # "working" lasts this long after an action
     "awake_secs": 120.0,  # woken from the bar: stays awake this long without a task
+    "wake_note_secs": 4.0,  # woken while no AI waits: says so this long, then sleeps
     "pill": "always",     # control bar: "always", "auto" (only while working) or "off"
 }
 
@@ -277,9 +278,14 @@ class X11Overlay:
         self.awake_until = 0.0
         self.stopped_until = 0.0
         self.wake_pointer = False
+        self.ai_waiting = 0  # AIs waiting in wait_for_wake
+        self.handoff = False  # the current wake went to a waiting AI
+        self.others_waiting = False  # another helper's AI waits (bar owner steps aside)
+        self.others_checked = 0.0
         self.bar_mode = str(self.cfg.get("pill", "always"))
         self.bar_owner = BarOwner(self.cfg.get("bar_lock", BAR_LOCK))
         self.bar_owner_retry = 0.0
+        self.wait_dir = waiting_dir(self.cfg.get("bar_lock", BAR_LOCK))
         self.bar = None if self.bar_mode == "off" else _Bar(self.on_bar_label, self.on_bar)
 
         self.pointer = _Panel(self.composited, 26, 28, painter=self._paint_pointer)
@@ -567,7 +573,8 @@ class X11Overlay:
             paused=self.paused, takeover=False, takeover_resume="auto",
             working=self._working(), turbo=bool(self.cfg.get("turbo")),
             current_mode=self.bar.mode, bar_mode=self.bar_mode,
-            owner=self.bar_owner.owned, awake=self._awake(),
+            owner=self.bar_owner.owned, awake=self._awake(), ai_waiting=self.ai_waiting > 0,
+            handoff=self.handoff, other_waiting=self.others_waiting,
         )
         if view is None:
             self.bar.hide()
@@ -585,6 +592,12 @@ class X11Overlay:
                 self._refresh_bar()
         if self.awake_until and now >= self.awake_until:
             self.sleep()
+        if self.bar_owner.owned and now >= self.others_checked:
+            self.others_checked = now + 1.0
+            others = not self.ai_waiting and others_waiting(self.wait_dir, os.getpid())
+            if others != self.others_waiting:
+                self.others_waiting = others
+                self._refresh_bar()
         if self.bar is not None:
             if self.bar.mode == "working" and not self._working():
                 self._refresh_bar()
@@ -603,6 +616,7 @@ class X11Overlay:
 
     def _end_awake(self) -> None:
         self.awake_until = 0.0
+        self.handoff = False
         self.send_event("sleep")
 
     def on_bar_label(self) -> None:
@@ -615,7 +629,12 @@ class X11Overlay:
             self.sleep()
 
     def wake(self) -> None:
-        self.awake_until = time.monotonic() + max(5.0, float(self.cfg["awake_secs"]))
+        """See ``mac_helper.OverlayController.wake``: hands back to a waiting AI."""
+        if self.paused:
+            self.set_paused(False)
+        self.handoff = self.ai_waiting > 0
+        secs = float(self.cfg["awake_secs"]) if self.handoff else float(self.cfg["wake_note_secs"])
+        self.awake_until = time.monotonic() + max(0.5, secs)
         self.send_event("wake")
         self._refresh_bar()
         if self.cursor is None:
@@ -634,6 +653,16 @@ class X11Overlay:
             self.pointer.hide()
             self.tag.hide()
             self.cursor = None
+        self._refresh_bar()
+
+    def _ai_wait(self, start: bool) -> None:
+        if start:
+            self.ai_waiting += 1
+            if self.awake_until:
+                self.sleep()
+        else:
+            self.ai_waiting = max(0, self.ai_waiting - 1)
+        mark_waiting(self.wait_dir, os.getpid(), self.ai_waiting > 0)
         self._refresh_bar()
 
     def on_bar(self, which: str) -> None:
@@ -829,6 +858,12 @@ class X11Overlay:
             self.capture_hidden = False
             self._apply_visibility()
             self.ack(msg_id)
+        elif op == "sleep.wait":
+            self._ai_wait(True)
+            self.ack(msg_id)
+        elif op == "sleep.done":
+            self._ai_wait(False)
+            self.ack(msg_id)
         elif op == "ping":
             self.ack(msg_id)
         elif op == "bye":
@@ -890,6 +925,7 @@ class X11Overlay:
         if self.pending_confirm is not None:
             self._answer_confirm(False)
         self.bar_owner.release()
+        mark_waiting(self.wait_dir, os.getpid(), False)
         Gtk.main_quit()
         return False
 

@@ -55,6 +55,11 @@ def _notify_tools_changed() -> None:
     return session.send_tool_list_changed()
 
 
+# Tools that never act and may block for minutes: kept out of the lease's tool
+# scope, so a concurrent acting tool's lease turn ends when that tool returns.
+_OUTSIDE_LEASE_TOOLS = frozenset({"wait_for_wake"})
+
+
 class DobbyServer(MCPServer):
     """MCP server whose tools/list follows the active domain profile."""
 
@@ -76,7 +81,7 @@ class DobbyServer(MCPServer):
             raise ToolError(f"Tool '{name}' is outside the active tool profile. Call manage_toolsets to enable it.")
         _adopt_client_name(context)
         ctl = get_controller(create=False)
-        if ctl is None:
+        if ctl is None or name in _OUTSIDE_LEASE_TOOLS:
             return await super().call_tool(name, arguments, context)
         # A tool's steps share one lease turn: the first action acquires it and it
         # stays busy until the tool returns, so another agent never cuts in between.
@@ -123,6 +128,7 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "request_control": ("core", "Waits for and takes control of the desktop"),
     "release_control": ("core", "Gives desktop control to a waiting agent"),
     "hold_control": ("core", "Keeps desktop control through a fragile multi-step flow"),
+    "wait_for_wake": ("core", "Stays available after a task until the user clicks Dobby's bar to wake it"),
     # Window management
     "list_windows": ("window_mgmt", "Lists active top-level windows"),
     "get_active_window": ("window_mgmt", "Gets currently active window"),
@@ -1751,6 +1757,59 @@ def hold_control(seconds: float = 30.0) -> Dict[str, Any]:
     except ControlChanged as exc:
         return {"ok": False, "look_again": True, "note": str(exc)}
     return {"ok": True, **held, **ctl.status()}
+
+
+WAIT_FOR_WAKE_CAP_S = 1800
+
+
+def _wait_for_wake_blocking(timeout_s: float, reason: str, cancel: Any = None) -> Dict[str, Any]:
+    """Body of :func:`wait_for_wake`, run in a worker thread."""
+    from dobby.overlay import find_overlay_hal
+
+    ov_hal = find_overlay_hal(hal)
+    if ov_hal is None:
+        return {"ok": True, "woken": False, "stopped": False, "timed_out": False, "waited_s": 0.0,
+                "unavailable": True,
+                "note": "The Dobby overlay is off, so there is no bar to click. End your turn instead."}
+    ctl = _control_or_none()
+    if ctl is not None:
+        ctl.release()  # waiting is not acting: let another agent use the desktop meanwhile
+    secs = max(0.0, min(float(timeout_s), WAIT_FOR_WAKE_CAP_S))
+    out: Dict[str, Any] = {"ok": True, **ov_hal.overlay.wait_for_wake(secs, reason or "", cancel=cancel)}
+    if out.get("woken"):
+        out["note"] = ("The user woke Dobby. Ask for or continue with their next instruction, "
+                       "and look at the screen again before acting.")
+    elif out.get("stopped"):
+        out["note"] = "The user pressed Stop. Do not start new desktop work unless they ask."
+    elif out.get("timed_out"):
+        out["note"] = "Nobody woke Dobby. Call wait_for_wake again to stay available, or end your turn."
+    elif out.get("unavailable"):
+        out["note"] = "The overlay is not running, so there is no bar to click. End your turn instead."
+    return out
+
+
+@mcp_server.tool()
+async def wait_for_wake(timeout_s: int = 600, reason: str = "") -> Dict[str, Any]:
+    """Call when you have finished the current task and want to stay available.
+
+    Dobby shows "sleeping · click to wake" on screen; when the user clicks the
+    bar to wake Dobby, this returns and you should ask/continue with the user's
+    next instruction or re-check the screen. Returns woken/stopped/timed_out
+    (and waited_s). timeout_s is capped at 1800; `reason` shows in the bar's
+    tooltip (e.g. "finished the report; ready for more"). Waiting does not
+    hold desktop control, so other agents can work meanwhile.
+    """
+    import threading
+
+    import anyio.to_thread
+
+    cancel = threading.Event()
+    try:
+        return await anyio.to_thread.run_sync(
+            lambda: _wait_for_wake_blocking(timeout_s, reason, cancel), abandon_on_cancel=True)
+    except BaseException:
+        cancel.set()  # the client cancelled: take the waiting bar down
+        raise
 
 
 def main():

@@ -126,8 +126,8 @@ from . import geometry, protocol
 
 _kCGEventSourceUserData = 42
 DOBBY_EVENT_TAG = 0x444F4242  # same value as dobby.hal.macos.DOBBY_EVENT_TAG
-from .barlock import BAR_LOCK, BarOwner as _BarOwner
-from .menu import bar_click, bar_view, label_click, menu_entries, picker_groups, status_of
+from .barlock import BAR_LOCK, BarOwner as _BarOwner, mark_waiting, others_waiting, waiting_dir
+from .menu import bar_click, bar_tip, bar_view, label_click, menu_entries, picker_groups, status_of
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "color": "#7C5CFF",  # Dobby violet; deliberately not Claude's orange
@@ -147,6 +147,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "idle_secs": 2.0,
     "active_secs": 8.0,  # "working" lasts this long after an action
     "awake_secs": 120.0,  # woken from the bar: stays awake this long without a task
+    "wake_note_secs": 4.0,  # woken while no AI waits: says so this long, then sleeps
     # Control bar at the top: "always" (stays while Dobby runs; the user can
     # hide it), "auto" (only while working) or "off".
     "pill": "always",
@@ -801,10 +802,11 @@ class _Pill:
         self.ducked = False
         self.user_hidden = False
 
-    def show(self, mode: str, text: str, primary: str, secondary: str, rgb, dot_alpha: float = 1.0) -> None:
+    def show(self, mode: str, text: str, primary: str, secondary: str, rgb, dot_alpha: float = 1.0,
+             tip: Optional[str] = None) -> None:
         self.mode = mode
         self.label.setStringValue_(text)
-        tip = _LABEL_TIPS.get(mode)
+        tip = tip or _LABEL_TIPS.get(mode)
         self.view.setToolTip_(tip)
         self.label.setToolTip_(tip)
         self.label.sizeToFit()
@@ -954,6 +956,12 @@ class OverlayController:
         self.stopped_until = 0.0
         self.awake_until = 0.0  # woken from the bar until then, or 0
         self.wake_pointer = False  # the pointer is showing only because of a wake
+        # An AI waits in wait_for_wake (count of sleep.wait without sleep.done).
+        self.ai_waiting = 0
+        self.wait_reason = ""
+        self.handoff = False  # the current wake went to a waiting AI
+        self.others_waiting = False  # another helper's AI waits (bar owner steps aside)
+        self.others_checked = 0.0
         self.probe = _AXProbe()
         self.target = _Target.alloc().initWithOwner_(self)
         mode = self.cfg.get("pill", "always")
@@ -967,6 +975,7 @@ class OverlayController:
         self.hotspot = _ChipHotspot(self.target) if self.cfg.get("chip_menu") else None
         self.bar_owner = _BarOwner(self.cfg.get("bar_lock", BAR_LOCK))
         self.bar_owner_retry = 0.0
+        self.wait_dir = waiting_dir(self.cfg.get("bar_lock", BAR_LOCK))
         self.interactive = interactive
         self.status_item = None
         self.rebuild_panels()
@@ -1292,6 +1301,12 @@ class OverlayController:
             self._refresh_pill()
         if self.awake_until and now >= self.awake_until:
             self.sleep()  # woken, but no task came
+        if self.bar_owner.owned and now >= self.others_checked:
+            self.others_checked = now + 1.0
+            others = not self.ai_waiting and others_waiting(self.wait_dir, os.getpid())
+            if others != self.others_waiting:
+                self.others_waiting = others
+                self._refresh_pill()
         if self.pill is not None:
             if self.pill.mode == "working" and now - self.last_action > float(self.cfg["active_secs"]):
                 self._refresh_pill()
@@ -1354,6 +1369,7 @@ class OverlayController:
 
     def _end_awake(self) -> None:
         self.awake_until = 0.0
+        self.handoff = False
         self.send_event("sleep")
 
     def on_pill_label(self) -> None:
@@ -1367,9 +1383,23 @@ class OverlayController:
             self.sleep()
 
     def wake(self) -> None:
-        """The user woke Dobby: show it is ready for a task."""
+        """The user woke Dobby.
+
+        With an AI waiting in ``wait_for_wake`` the "wake" event returns that
+        call and the bar says it hands back to the AI until the next action.
+        With none, the bar says so for ``wake_note_secs`` and sleeps again:
+        nothing would act on the wake. Waking also ends a pause or take-over,
+        so the AI it hands back to is not blocked at its first step.
+        """
         now = time.monotonic()
-        self.awake_until = now + max(5.0, float(self.cfg["awake_secs"]))
+        if self.takeover:
+            self.takeover = False
+            self.send_event("user_idle")
+        if self.paused:
+            self.set_paused(False)
+        self.handoff = self.ai_waiting > 0
+        secs = float(self.cfg["awake_secs"]) if self.handoff else float(self.cfg["wake_note_secs"])
+        self.awake_until = now + max(0.5, secs)
         self.send_event("wake")
         if self.pill_user_hidden:
             self.set_pill_hidden(False)
@@ -1394,6 +1424,22 @@ class OverlayController:
             self.cursor = None
         self._refresh_pill()
 
+    def _ai_wait(self, start: bool, reason: str = "") -> None:
+        """An AI starts or stops waiting in ``wait_for_wake``."""
+        if start:
+            self.ai_waiting += 1
+            self.wait_reason = reason
+            if self.awake_until:
+                self.sleep()  # back to "sleeping · click to wake"
+        else:
+            self.ai_waiting = max(0, self.ai_waiting - 1)
+        if not self.ai_waiting:
+            self.wait_reason = ""
+        mark_waiting(self.wait_dir, os.getpid(), self.ai_waiting > 0)
+        if self.ai_waiting and self.pill_user_hidden:
+            self.set_pill_hidden(False)  # the click target must be on screen
+        self._refresh_pill()
+
     def _below_bar(self) -> Tuple[float, float]:
         """Global top-left point under the bar, clear of where the bar ducks."""
         if self.pill is not None:
@@ -1414,14 +1460,16 @@ class OverlayController:
             paused=self.paused, takeover=self.takeover, takeover_resume=self.cfg["takeover_resume"],
             working=time.monotonic() - self.last_action <= float(self.cfg["active_secs"]),
             turbo=self.turbo, current_mode=self.pill.mode, bar_mode=self.pill_mode,
-            owner=self.bar_owner.owned, awake=self._awake(),
+            owner=self.bar_owner.owned, awake=self._awake(), ai_waiting=self.ai_waiting > 0,
+            handoff=self.handoff, other_waiting=self.others_waiting,
         )
         if view is None:
             self.pill.hide()
         else:
             mode, text, primary, secondary, color, dot_alpha = view
             rgb = self.rgb if color == "risk" else self.colors[color]
-            self.pill.show(mode, text, primary, secondary, rgb, dot_alpha=dot_alpha)
+            self.pill.show(mode, text, primary, secondary, rgb, dot_alpha=dot_alpha,
+                           tip=bar_tip(mode, self.ai_waiting > 0, self.wait_reason))
         self._refresh_menu()
 
     def set_pill_hidden(self, hidden: bool) -> None:
@@ -1622,7 +1670,7 @@ class OverlayController:
         for title, action, state in menu_entries(
             status, self.steps, halted, self.turbo, self.user_visible,
             self.trail_on, None if self.pill is None else not self.pill_user_hidden,
-            awake=None if (working or halted) else self._awake(),
+            awake=None if (working or (halted and not self.ai_waiting)) else self._awake(),
         ):
             if title == "-":
                 menu.addItem_(NSMenuItem.separatorItem())
@@ -1858,6 +1906,12 @@ class OverlayController:
             self.capture_hidden = False
             self._apply_alpha()
             self.ack(msg_id)
+        elif op == "sleep.wait":
+            self._ai_wait(True, str(msg.get("reason") or ""))
+            self.ack(msg_id)
+        elif op == "sleep.done":
+            self._ai_wait(False)
+            self.ack(msg_id)
         elif op == "ping":
             self.ack(msg_id)
         elif op == "bye":
@@ -1892,6 +1946,7 @@ class OverlayController:
             except Exception:  # noqa: BLE001
                 pass
         self.bar_owner.release()
+        mark_waiting(self.wait_dir, os.getpid(), False)
         AppHelper.stopEventLoop()
 
 

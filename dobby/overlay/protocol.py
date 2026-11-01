@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 #: Name given to every overlay panel, so window listings can filter them out.
 OVERLAY_WINDOW_TITLE = "Dobby Overlay"
@@ -42,6 +42,9 @@ OPS: Dict[str, tuple] = {
     "overlay.visible": (("on",), ()),
     "glow.track": ((), ("window_id", "pid")),
     "glow.clear": ((), ()),
+    # An AI waits for the user to wake Dobby (``wait_for_wake``), then is done.
+    "sleep.wait": ((), ("reason",)),
+    "sleep.done": ((), ()),
     "hide": ((), ()),
     "show": ((), ()),
     "ping": ((), ()),
@@ -71,7 +74,7 @@ def validate(msg: Dict[str, Any]) -> Dict[str, Any]:
     for k in ("x", "y", "w", "h", "ms", "secs"):
         if k in msg and (isinstance(msg[k], bool) or not isinstance(msg[k], (int, float))):
             raise ProtocolError(f"{op}: {k} must be a number")
-    for k in ("verb", "text"):
+    for k in ("verb", "text", "reason"):
         if k in msg and not isinstance(msg[k], str):
             raise ProtocolError(f"{op}: {k} must be a string")
     for k in ("probe", "on"):

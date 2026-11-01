@@ -89,6 +89,11 @@ class NullOverlay:
     def checkpoint(self, max_wait: float = 120.0) -> None:
         return None
 
+    def wait_for_wake(self, timeout_s: float = 600.0, reason: str = "",
+                      cancel: Optional[threading.Event] = None) -> Dict[str, Any]:
+        """No overlay, no bar to click: return at once."""
+        return {"woken": False, "stopped": False, "timed_out": False, "waited_s": 0.0, "unavailable": True}
+
     def track(self, window_id: Any = None, pid: Optional[int] = None) -> bool:
         return True
 
@@ -138,6 +143,8 @@ class OverlayClient(NullOverlay):
         self._user_active = False
         self._user_input_seen = False
         self.awake = False
+        self._wakes = 0  # "wake" / "stop" events seen, for wait_for_wake
+        self._stops = 0
         self._wake_callbacks: List[Callable[[], None]] = []
         atexit.register(self.close)
 
@@ -264,6 +271,7 @@ class OverlayClient(NullOverlay):
     def _on_event(self, name: str) -> None:
         with self._cond:
             if name == "stop":
+                self._stops += 1
                 self._stop_requested = True
                 self._paused = False
             elif name == "pause":
@@ -276,6 +284,7 @@ class OverlayClient(NullOverlay):
             elif name == "user_idle":
                 self._user_active = False
             elif name == "wake":
+                self._wakes += 1
                 self.awake = True
             elif name == "sleep":
                 self.awake = False
@@ -371,6 +380,64 @@ class OverlayClient(NullOverlay):
                 "The user used the mouse or keyboard while Dobby was working. "
                 "This step was skipped: take a new screenshot and decide again."
             )
+
+    def wait_for_wake(self, timeout_s: float = 600.0, reason: str = "",
+                      cancel: Optional[threading.Event] = None) -> Dict[str, Any]:
+        """Block until the user wakes Dobby from the bar, presses Stop, or ``timeout_s``.
+
+        The bar reads "Dobby is sleeping · click to wake" while this waits, on
+        whichever helper belongs to this server. Returns ``woken``,
+        ``stopped``, ``timed_out`` and ``waited_s``; ``unavailable`` when the
+        helper cannot run or dies, ``cancelled`` when ``cancel`` is set.
+
+        * Only a wake or Stop that arrives during the wait counts.
+        * A Stop pending from before (pressed on the idle bar) is reported
+          at once and consumed, like a Stop is reported by one checkpoint.
+        * Pause while waiting changes nothing. A wake ends a pause or
+          take-over (the helper sends "resume" / "user_idle" first), and
+          clears the take-over flag here, so the AI's first step after the
+          wake is not skipped as interrupted: it is told to look again anyway.
+        """
+        t0 = time.monotonic()
+        result: Dict[str, Any] = {"woken": False, "stopped": False, "timed_out": False, "waited_s": 0.0}
+        if not self._ensure_started():
+            return {**result, "unavailable": True}
+        with self._cond:
+            if self._stop_requested:
+                self._stop_requested = False
+                self._user_input_seen = False
+                return {**result, "stopped": True}
+            wakes, stops = self._wakes, self._stops
+        if not self._send("sleep.wait", reason=reason or None):
+            return {**result, "unavailable": True}
+        deadline = t0 + max(0.0, float(timeout_s))
+        try:
+            with self._cond:
+                while True:
+                    if self._stops != stops:
+                        self._stop_requested = False  # reported here, not again at the next step
+                        self._user_input_seen = False
+                        result["stopped"] = True
+                        break
+                    if self._wakes != wakes:
+                        self._paused = self._user_active = self._user_input_seen = False
+                        result["woken"] = True
+                        break
+                    if not self.active:
+                        result["unavailable"] = True
+                        break
+                    if cancel is not None and cancel.is_set():
+                        result["cancelled"] = True
+                        break
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        result["timed_out"] = True
+                        break
+                    self._cond.wait(min(left, 0.25))
+        finally:
+            self._send("sleep.done")
+        result["waited_s"] = round(time.monotonic() - t0, 2)
+        return result
 
     def confirm(self, text: str, secs: float = 30.0) -> bool:
         """Ask the user Allow/Deny on the pill. False on deny or timeout."""

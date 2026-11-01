@@ -23,8 +23,11 @@ Resume), ``DOBBY_OVERLAY_TRAIL=0`` hides the numbered step trail,
 Allow/Deny prompts for risky steps and no pause when you touch the mouse or
 keyboard; only Stop / Pause halt Dobby.
 
-Click the sleeping control bar to wake Dobby: its pointer appears and the bar
-says it is ready for a task for ``DOBBY_OVERLAY_AWAKE_SECS`` (default 120).
+Click the sleeping control bar to wake Dobby. If the AI waits in the
+``wait_for_wake`` tool, that call returns and the bar says it hands back to
+the AI (until its next action, or ``DOBBY_OVERLAY_AWAKE_SECS``, default 120).
+If no AI waits, the bar says so for a few seconds and Dobby sleeps again: an
+MCP server cannot start a new AI turn by itself.
 The bar's ▾ button opens Dobby's menu. ``DOBBY_OVERLAY_MENU_BAR=1`` also puts
 a Dobby icon in the macOS menu bar (off by default).
 

@@ -2,7 +2,7 @@
 
 # Dobby MCP tools
 
-53 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
+54 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
 
 ## core
 
@@ -24,6 +24,7 @@
 | `request_control` | `max_wait_s=None` | Waits (up to max_wait_s, default the server's max wait) and takes control. |
 | `release_control` | none | Gives up desktop control so a waiting agent can start at once. |
 | `hold_control` | `seconds=30.0` | Keeps control for up to `seconds` (capped) even while idle or past the slice. |
+| `wait_for_wake` | `timeout_s=600`, `reason=''` | Call when you have finished the current task and want to stay available. |
 
 ## window_mgmt
 

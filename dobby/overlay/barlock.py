@@ -47,3 +47,42 @@ class BarOwner:
             except OSError:
                 pass
             self.fh = None
+
+
+def waiting_dir(bar_lock: str = BAR_LOCK) -> str:
+    """Where helpers mark that their AI waits for a wake (next to the bar lock)."""
+    return os.path.join(os.path.dirname(bar_lock), "waiting")
+
+
+def mark_waiting(path: str, pid: int, on: bool) -> None:
+    """Create or remove ``<path>/<pid>`` while this helper's AI waits."""
+    marker = os.path.join(path, str(pid))
+    try:
+        if on:
+            os.makedirs(path, exist_ok=True)
+            open(marker, "a").close()
+        else:
+            os.unlink(marker)
+    except OSError:
+        pass
+
+
+def others_waiting(path: str, own_pid: int) -> bool:
+    """True if another live helper's AI waits for a wake. Drops stale markers."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    found = False
+    for name in names:
+        if not name.isdigit() or int(name) == own_pid:
+            continue
+        try:
+            os.kill(int(name), 0)
+        except ProcessLookupError:
+            mark_waiting(path, int(name), False)
+            continue
+        except OSError:
+            pass  # alive, owned by someone else
+        found = True
+    return found

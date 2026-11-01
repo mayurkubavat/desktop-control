@@ -102,7 +102,7 @@ def tools_reference() -> str:
     src = ROOT / "dobby" / "server.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     domains = _literal_dict(tree, "_TOOL_DOMAINS")
-    tools = [n for n in tree.body if isinstance(n, ast.FunctionDef) and _is_tool(n)]
+    tools = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_tool(n)]
     by_domain: Dict[str, List[ast.FunctionDef]] = {}
     for fn in tools:
         domain = domains.get(fn.name, ("unregistered", ""))[0]

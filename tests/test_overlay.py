@@ -124,6 +124,9 @@ def test_overlay_config():
     assert cfg == {"color": "#00ff00", "speed": 0.0, "label": "D"}
     assert overlay_config({"DOBBY_OVERLAY_SPEED": "fast"}) == {}
     assert overlay_config({"DOBBY_OVERLAY_CAPTURE_VISIBLE": "0"}) == {"capture_visible": False}
+    assert overlay_config({"DOBBY_OVERLAY_TURBO": "1", "DOBBY_OVERLAY_RESUME": "manual",
+                           "DOBBY_OVERLAY_IDLE_SECS": "0.1", "DOBBY_OVERLAY_TRAIL": "0"}) == {
+        "turbo": True, "takeover_resume": "manual", "idle_secs": 0.5, "trail": False}
 
 
 def test_wrap_hal_is_noop_when_disabled():
@@ -141,6 +144,12 @@ FAKE_HELPER = textwrap.dedent("""
         msg = json.loads(line)
         if msg.get("op") == "cursor.move" and msg.get("x") == 666:
             continue  # simulate a lost ack
+        if msg.get("op") == "intent" and msg.get("text", "").startswith("EMIT:"):
+            for name in msg["text"][5:].split(","):
+                print(json.dumps({"event": name}), flush=True)
+        if msg.get("op") == "confirm":
+            print(json.dumps({"ack": msg["id"], "ok": msg["text"] == "yes?"}), flush=True)
+            continue
         if "id" in msg:
             print(json.dumps({"ack": msg["id"], "ok": True}), flush=True)
         if msg.get("op") == "bye":
@@ -221,9 +230,34 @@ class RecordingOverlay(NullOverlay):
     def __init__(self):
         self.calls = []
 
-    def move(self, x, y, ms=None, wait=True):
-        self.calls.append(("move", x, y, ms, wait))
+    def move(self, x, y, ms=None, wait=True, verb=None, probe=False):
+        self.calls.append(("move", x, y, ms, wait) + ((verb, probe) if (verb or probe) else ()))
         return True
+
+    def intent(self, text, ms=None):
+        self.calls.append(("intent", text))
+        return True
+
+    def risk(self, level):
+        self.calls.append(("risk", level))
+        return True
+
+    def scan(self, rect=None):
+        self.calls.append(("scan", rect))
+        return True
+
+    def clear_box(self):
+        self.calls.append(("clear_box",))
+        return True
+
+    def checkpoint(self, max_wait=120.0):
+        self.calls.append(("checkpoint",))
+
+    answer = True
+
+    def confirm(self, text, secs=30.0):
+        self.calls.append(("confirm", text))
+        return self.answer
 
     def click(self, button="left", count=1):
         self.calls.append(("click", button, count))
@@ -289,41 +323,45 @@ def wrapped():
 
 def test_click_points_first_then_acts_then_ripples(wrapped):
     hal, ev = wrapped
-    assert hal.mouse_click(5, 6, "right", 2) == "clicked"
-    assert ev == [("move", 5, 6, None, True), ("hal.click", 5, 6, "right", 2), ("click", "right", 2)]
+    assert hal.mouse_click(5, 6, "right", 1) == "clicked"
+    assert ev == [("checkpoint",), ("move", 5, 6, None, True, "Right-click", True),
+                  ("hal.click", 5, 6, "right", 1), ("click", "right", 1)]
 
 
 def test_coordinate_converter_applies_to_overlay_only():
     ov = RecordingOverlay()
     hal = OverlayHAL(FakeHAL(ov.calls), ov, to_points=lambda x, y: (x / 2, y / 2))
     hal.mouse_move(100, 50)
-    assert ov.calls == [("move", 50.0, 25.0, None, True), ("hal.move", 100, 50)]
+    assert ov.calls == [("checkpoint",), ("move", 50.0, 25.0, None, True, "Move", False), ("hal.move", 100, 50)]
 
 
 def test_drag_follows_in_parallel(wrapped):
     hal, ev = wrapped
     hal.mouse_drag(0, 0, 10, 10, 0.5)
-    assert ev == [("move", 0, 0, None, True), ("move", 10, 10, 500, False), ("hal.drag", 0, 0, 10, 10)]
+    assert ev == [("checkpoint",), ("move", 0, 0, None, True, "Drag", True), ("move", 10, 10, 500, False),
+                  ("hal.drag", 0, 0, 10, 10), ("clear_box",)]
 
 
 def test_typing_badge_reset_even_on_error(wrapped):
     hal, ev = wrapped
     with pytest.raises(RuntimeError):
         hal.keyboard_type("boom")
-    assert ev == [("state", "typing"), ("hal.type", "boom"), ("state", "idle")]
+    assert ev == [("checkpoint",), ("intent", "Type \u201cboom\u201d"), ("state", "typing"),
+                  ("hal.type", "boom"), ("state", "idle")]
 
 
 def test_focus_tracks_only_on_success(wrapped):
     hal, ev = wrapped
     assert hal.focus_window("0x1") is True
     assert hal.focus_window("missing") is False
-    assert ev == [("hal.focus", "0x1"), ("track", "0x1"), ("hal.focus", "missing")]
+    assert ev == [("checkpoint",), ("hal.focus", "0x1"), ("track", "0x1"), ("checkpoint",), ("hal.focus", "missing")]
 
 
 def test_capture_hides_overlay(wrapped):
     hal, ev = wrapped
     assert hal.capture_screen((0, 0, 10, 10)) == "image"
-    assert ev == [("hide",), ("hal.capture", (0, 0, 10, 10)), ("show",)]
+    assert ev == [("hide",), ("hal.capture", (0, 0, 10, 10)), ("show",), ("scan", (0, 0, 10, 10)),
+                  ("state", "thinking")]
 
 
 def test_capture_skips_handshake_when_inactive():
@@ -365,3 +403,226 @@ def test_active_window_errors_are_ignored():
 
     inner.get_active_window = broken
     assert OverlayHAL(inner, ov).mouse_click(1, 1) == "clicked"
+
+
+# --------------------------------------------------------------- phase 2
+from dobby.overlay import OverlayInterrupted, OverlayStopped, find_overlay_hal, step  # noqa: E402
+from dobby.overlay.hal import combo_label, danger_reason, typed_label  # noqa: E402
+
+
+def test_protocol_v2_ops():
+    assert p.decode(p.encode("cursor.move", 1, x=1, y=2, verb="Click", probe=True))["probe"] is True
+    assert p.decode(p.encode("risk", None, level="danger"))["level"] == "danger"
+    assert p.decode(p.encode("confirm", 3, text="ok?", secs=5))["secs"] == 5
+    for bad in ({"op": "risk", "level": "spicy"}, {"op": "scan", "x": 1},
+                {"op": "cursor.move", "x": 1, "y": 1, "probe": "yes"},
+                {"op": "intent", "text": 5}, {"op": "target.box", "x": 1, "y": 1, "w": True, "h": 1}):
+        with pytest.raises(p.ProtocolError):
+            p.validate(bad)
+    assert json.loads(p.event("stop")) == {"event": "stop"}
+    with pytest.raises(p.ProtocolError):
+        p.event("explode")
+
+
+def test_labels():
+    assert combo_label(["cmd", "shift", "s"]) == "\u21e7\u2318S"
+    assert combo_label(["Return"]) == "Return"
+    assert danger_reason(["command", "q"]) == "quit the app"
+    assert danger_reason(["cmd", "s"]) is None
+    assert typed_label("hello world") == "Type \u201chello world\u201d"
+    assert typed_label("x" * 40).endswith("\u2026\u201d")
+    assert "\u2022" in typed_label("Hunter2!secret")
+    assert "\u2022" not in typed_label("just a sentence")
+
+
+def test_client_stop_event_raises_at_checkpoint(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:stop")
+    client.move(1, 1, ms=0)  # round trip so the event has been read
+    with pytest.raises(OverlayStopped) as exc:
+        client.checkpoint()
+    assert not isinstance(exc.value, OverlayInterrupted)
+    client.checkpoint()  # stop is one-shot
+
+
+def test_client_pause_then_resume(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:pause")
+    client.move(1, 1, ms=0)
+    import threading as _t
+    _t.Timer(0.3, lambda: client.intent("EMIT:resume")).start()
+    t0 = time.monotonic()
+    client.checkpoint(max_wait=5)
+    assert 0.2 < time.monotonic() - t0 < 3
+
+
+def test_client_pause_timeout(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:pause")
+    client.move(1, 1, ms=0)
+    with pytest.raises(OverlayStopped):
+        client.checkpoint(max_wait=0.3)
+
+
+def test_client_takeover_skips_step_after_idle(fake_client):
+    client, _ = fake_client
+    client.intent("EMIT:user_input")
+    client.move(1, 1, ms=0)
+    import threading as _t
+    _t.Timer(0.3, lambda: client.intent("EMIT:user_idle")).start()
+    with pytest.raises(OverlayInterrupted):
+        client.checkpoint(max_wait=5)
+    client.checkpoint()  # next action goes ahead
+
+
+def test_client_confirm(fake_client):
+    client, log = fake_client
+    assert client.confirm("yes?", secs=2) is True
+    assert client.confirm("no?", secs=2) is False
+    ops = _ops(log)
+    assert ops.count("confirm") == 2 and "confirm.cancel" in ops
+
+
+def test_client_writes_track(tmp_path):
+    script = tmp_path / "helper.py"
+    script.write_text(FAKE_HELPER)
+    client = OverlayClient(cmd=[sys.executable, str(script), str(tmp_path / "log")], track_dir=tmp_path / "tracks")
+    client.move(5, 6, ms=0, verb="Click", probe=True)
+    client.hide()
+    client.risk("caution")
+    client.close()
+    lines = [json.loads(x) for x in client.track_path.read_text().splitlines()]
+    assert [m["op"] for m in lines] == ["cursor.move", "risk"]
+    assert all("ts" in m and "id" not in m for m in lines)
+
+
+def test_danger_hotkey_denied_raises():
+    ov = RecordingOverlay()
+    ov.answer = False
+    events = ov.calls
+
+    class K(FakeHAL):
+        def keyboard_hotkey(self, keys):
+            events.append(("hal.hotkey", tuple(keys)))
+
+    hal = OverlayHAL(K(events), ov)
+    with pytest.raises(OverlayStopped):
+        hal.keyboard_hotkey(["cmd", "q"])
+    assert ("hal.hotkey", ("cmd", "q")) not in events
+    assert ("risk", "danger") in events and events[-2:] == [("risk", "ok"), ("intent", "")]
+
+
+def test_danger_hotkey_allowed_runs_and_safe_hotkey_skips_confirm():
+    ov = RecordingOverlay()
+    events = ov.calls
+
+    class K(FakeHAL):
+        def keyboard_hotkey(self, keys):
+            events.append(("hal.hotkey", tuple(keys)))
+
+    hal = OverlayHAL(K(events), ov)
+    hal.keyboard_hotkey(["cmd", "w"])
+    assert ("hal.hotkey", ("cmd", "w")) in events
+    events.clear()
+    hal.keyboard_hotkey(["cmd", "s"])
+    assert not any(e[0] == "confirm" for e in events)
+    assert ("intent", "Press \u2318S") in events
+
+
+def test_step_context_sets_intent_and_risk():
+    ov = RecordingOverlay()
+    hal = OverlayHAL(FakeHAL(ov.calls), ov)
+    with step(hal, "Run synthesis", risk="caution"):
+        hal.mouse_click(1, 2)
+    calls = ov.calls
+    assert ("intent", "Run synthesis") in calls and ("risk", "caution") in calls
+    move = next(c for c in calls if c[0] == "move")
+    assert move[5:] == (None, True)  # verb suppressed inside a step, box still probed
+    assert calls[-2:] == [("risk", "ok"), ("intent", "")]
+
+
+def test_step_denied():
+    ov = RecordingOverlay()
+    ov.answer = False
+    hal = OverlayHAL(FakeHAL(ov.calls), ov)
+    with pytest.raises(OverlayStopped):
+        with hal.step("Delete the run", risk="danger"):
+            hal.mouse_click(1, 2)
+    assert not any(c[0] == "hal.click" for c in ov.calls)
+
+
+def test_step_is_noop_without_overlay_and_finds_session_backend():
+    plain = FakeHAL([])
+    with step(plain, "anything"):
+        pass
+    wrapped = OverlayHAL(FakeHAL([]), RecordingOverlay())
+    session = SimpleNamespace(backend=wrapped)
+    assert find_overlay_hal(session) is wrapped
+
+
+def test_scroll_and_key_intents(wrapped):
+    hal, ev = wrapped
+    hal._inner.mouse_scroll = lambda dx, dy: ev.append(("hal.scroll", dx, dy))
+    hal._inner.keyboard_press_key = lambda k: ev.append(("hal.key", k))
+    hal.mouse_scroll(0, -3)
+    hal.keyboard_press_key("Return")
+    assert ("intent", "Scroll down") in ev and ("intent", "Press Return") in ev
+
+
+# --------------------------------------------------------------- annotate
+from PIL import Image  # noqa: E402
+
+from dobby.overlay import annotate as an  # noqa: E402
+
+
+def _track():
+    return [
+        {"ts": 10.0, "op": "cursor.move", "x": 50, "y": 40, "verb": "Click", "probe": True},
+        {"ts": 10.1, "op": "target.box", "x": 40, "y": 30, "w": 30, "h": 20},
+        {"ts": 10.5, "op": "cursor.click"},
+        {"ts": 11.0, "op": "risk", "level": "danger"},
+        {"ts": 11.1, "op": "intent", "text": "Press \u2318Q", "ms": 1000},
+        {"ts": 13.0, "op": "cursor.move", "x": 120, "y": 90, "verb": "Click"},
+        {"ts": 13.2, "op": "cursor.click"},
+        {"ts": 14.0, "op": "trail.clear"},
+    ]
+
+
+def test_state_at_reconstructs_overlay():
+    ev = _track()
+    s = an.state_at(ev, 10.2)
+    assert s.cursor == (50, 40) and s.intent == "Click" and s.box == (40, 30, 30, 20)
+    s = an.state_at(ev, 11.5)
+    assert s.box is None and s.risk == "danger" and s.intent == "Press \u2318Q" and len(s.trail) == 1
+    s = an.state_at(ev, 13.5)
+    assert s.cursor == (120, 90) and [n for n, _ in s.trail] == [1, 3]
+    assert an.state_at(ev, 14.5).trail == []
+    assert an.state_at(ev, 9.0).cursor is None
+
+
+def test_annotate_draws_pointer_and_box():
+    base = Image.new("RGB", (200, 150), (255, 255, 255))
+    out = an.annotate(base, an.state_at(_track(), 10.2), glow_rect=(5, 5, 190, 140))
+    assert out.size == base.size
+    assert out.getpixel((51, 45)) != (255, 255, 255)  # inside the arrow
+    assert out.getpixel((150, 120)) == (255, 255, 255)  # untouched area
+    scaled = an.annotate(Image.new("RGB", (400, 300), "white"), an.state_at(_track(), 10.2), scale=2)
+    assert scaled.getpixel((102, 90)) != (255, 255, 255)
+
+
+def test_render_gif_and_frames(tmp_path):
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    for ts in (10.2, 11.5, 13500):  # last one in ms style -> 13.5 s
+        name = f"{ts}.png" if ts < 1e4 else "shot_0000000013500.png"
+        Image.new("RGB", (200, 150), "white").save(frames_dir / name)
+    found = an.find_frames(frames_dir)
+    assert len(found) == 3
+    track = tmp_path / "t.jsonl"
+    track.write_text("\n".join(json.dumps(e) for e in _track()) + "\nnot json\n")
+    assert len(an.load_track(track)) == 8
+    gif = tmp_path / "run.gif"
+    assert an.main(["--track", str(track), "--frames", str(frames_dir), "--out", str(gif)]) == 0
+    assert gif.exists() and Image.open(gif).n_frames >= 2
+    pngs = an.render(found, an.load_track(track), tmp_path / "pngs")
+    assert len(pngs) == 3

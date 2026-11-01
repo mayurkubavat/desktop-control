@@ -3,38 +3,115 @@
 ``OverlayHAL(inner, overlay)`` wraps any Dobby HAL. It forwards every call to
 ``inner`` and adds overlay side effects:
 
-* mouse actions: the agent pointer glides to the target first (waiting for
-  the helper's ack, capped by a timeout), then the real action fires, then a
-  click ripple is shown;
-* ``keyboard_type``: the pointer shows a typing badge while typing;
-* ``focus_window``: the target window gets the glowing border;
-* ``capture_screen``: the overlay is hidden for the capture so screenshots,
-  OCR and Gemma never see it;
+* before every action, :meth:`overlay.checkpoint` honours Stop, Pause and
+  user take-over (it may wait, or raise ``OverlayStopped`` /
+  ``OverlayInterrupted``);
+* mouse actions: the agent pointer glides to the target with a verb
+  ("Click", "Double-click", ...) and the helper boxes the element under it
+  and names it ("Click 'Run Synthesis'"), then the real action fires, then a
+  ripple and a numbered trail dot are shown;
+* keyboard: the name tag says what is typed or pressed; dangerous shortcuts
+  (quit, close, delete) turn the overlay red and ask Allow/Deny first;
+* ``focus_window`` and clicks move the glow to the window being worked on;
+* ``capture_screen``: the overlay is hidden for the capture, then a
+  "looking" shimmer runs while Dobby reads the screen;
 * ``list_windows``: overlay panels are filtered out.
 
-Anything not listed here is forwarded untouched through ``__getattr__``, so
-the wrapper keeps working when the HAL grows new methods.
+Tool handlers that know more can say so with :meth:`OverlayHAL.step`::
+
+    with hal.step("Run synthesis", risk="caution"):
+        hal.mouse_click(x, y)
+
+Anything not listed here is forwarded untouched through ``__getattr__``.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Tuple
+import contextlib
+import re
+from typing import Any, Callable, Iterator, List, Optional, Sequence, Tuple
 
 from .client import NullOverlay
 from .protocol import OVERLAY_WINDOW_TITLE
 
 ToPoints = Callable[[float, float], Tuple[float, float]]
 
+_MOD_ALIASES = {
+    "cmd": "cmd", "command": "cmd", "meta": "cmd", "super": "cmd", "win": "cmd",
+    "ctrl": "ctrl", "control": "ctrl",
+    "alt": "alt", "option": "alt", "opt": "alt",
+    "shift": "shift",
+}
+_MOD_SYMBOLS = {"ctrl": "⌃", "alt": "⌥", "shift": "⇧", "cmd": "⌘"}
+_MOD_ORDER = ("ctrl", "alt", "shift", "cmd")
+
+# (modifiers, key) combinations that close, quit, delete or force things.
+_DANGER = {
+    (frozenset({"cmd"}), "q"): "quit the app",
+    (frozenset({"cmd"}), "w"): "close the window",
+    (frozenset({"cmd", "alt"}), "w"): "close all windows",
+    (frozenset({"cmd"}), "delete"): "move to Trash",
+    (frozenset({"cmd"}), "backspace"): "move to Trash",
+    (frozenset({"cmd", "shift"}), "delete"): "empty the Trash",
+    (frozenset({"cmd", "shift"}), "backspace"): "empty the Trash",
+    (frozenset({"cmd", "alt", "shift"}), "delete"): "empty the Trash",
+    (frozenset({"cmd", "alt"}), "escape"): "force quit",
+    (frozenset({"cmd", "alt"}), "esc"): "force quit",
+    (frozenset({"ctrl", "cmd"}), "q"): "lock the screen",
+    (frozenset({"cmd", "shift"}), "q"): "log out",
+}
+
+
+def _split_combo(keys: Sequence[str]) -> Tuple[frozenset, str]:
+    mods, key = set(), ""
+    for k in keys:
+        name = str(k).strip().lower()
+        if name in _MOD_ALIASES:
+            mods.add(_MOD_ALIASES[name])
+        else:
+            key = name
+    return frozenset(mods), key
+
+
+def combo_label(keys: Sequence[str]) -> str:
+    mods, key = _split_combo(keys)
+    sym = "".join(_MOD_SYMBOLS[m] for m in _MOD_ORDER if m in mods)
+    return sym + (key.upper() if len(key) == 1 else key.capitalize())
+
+
+def danger_reason(keys: Sequence[str]) -> Optional[str]:
+    return _DANGER.get(_split_combo(keys))
+
+
+_SECRETISH = re.compile(r"^\S{8,}$")
+
+
+def typed_label(text: str, limit: int = 24) -> str:
+    """Intent text for typing; hides strings that look like passwords/tokens."""
+    one_line = " ".join(text.split())
+    classes = sum(bool(re.search(p, one_line)) for p in (r"[a-z]", r"[A-Z]", r"\d", r"[^\w\s]"))
+    if _SECRETISH.match(one_line) and classes >= 3:
+        return f"Type •••• ({len(text)} characters)"
+    if len(one_line) > limit:
+        one_line = one_line[: limit - 1] + "…"
+    return f"Type “{one_line}”"
+
+
+_VERBS = {("left", 1): "Click", ("left", 2): "Double-click", ("left", 3): "Triple-click",
+          ("right", 1): "Right-click", ("middle", 1): "Middle-click"}
+
 
 class OverlayHAL:
     def __init__(self, inner: Any, overlay: Optional[NullOverlay] = None,
-                 to_points: Optional[ToPoints] = None) -> None:
+                 to_points: Optional[ToPoints] = None, confirm_danger: bool = True) -> None:
         self._inner = inner
         self.overlay = overlay or NullOverlay()
         # HAL coordinates -> global points. Identity when the HAL already
         # works in points (Quartz events do); pass a converter otherwise.
         self._to_points: ToPoints = to_points or (lambda x, y: (x, y))
         self._tracked: Optional[str] = None
+        self._confirm_danger = confirm_danger
+        self._in_step = 0
 
     @property
     def inner(self) -> Any:
@@ -58,18 +135,54 @@ class OverlayHAL:
             self._tracked = str(wid)
             self.overlay.track(window_id=wid)
 
-    def _point_to(self, x: float, y: float, ms: Optional[int] = None, wait: bool = True) -> None:
+    def _point_to(self, x: float, y: float, ms: Optional[int] = None, wait: bool = True,
+                  verb: Optional[str] = None, probe: bool = False) -> None:
         px, py = self._to_points(x, y)
-        self.overlay.move(px, py, ms=ms, wait=wait)
+        # Inside a step() the tool already set the intent text; still box it.
+        self.overlay.move(px, py, ms=ms, wait=wait, verb=None if self._in_step else verb, probe=probe)
+
+    def _intent(self, text: str) -> None:
+        if not self._in_step:
+            self.overlay.intent(text)
+
+    @contextlib.contextmanager
+    def step(self, text: str, risk: Optional[str] = None, confirm: bool = False) -> Iterator[None]:
+        """Name the next action(s) for the overlay; optionally colour by risk.
+
+        With ``confirm=True`` (or risk "danger") the user is asked Allow/Deny
+        first; a deny raises ``OverlayStopped``.
+        """
+        from .client import OverlayStopped
+
+        self.overlay.checkpoint()
+        self.overlay.intent(text, ms=60000)
+        if risk:
+            self.overlay.risk(risk)
+        try:
+            if confirm or risk == "danger":
+                if not self.overlay.confirm(f"Allow Dobby to {text[:1].lower() + text[1:]}?"):
+                    raise OverlayStopped(f"The user denied: {text}")
+            self._in_step += 1
+            try:
+                yield
+            finally:
+                self._in_step -= 1
+        finally:
+            if risk and risk != "ok":
+                self.overlay.risk("ok")
+            self.overlay.intent("", ms=0)
 
     # --------------------------------------------------------------- mouse
     def mouse_move(self, x: int, y: int, *args: Any, **kwargs: Any) -> Any:
-        self._point_to(x, y)
+        self.overlay.checkpoint()
+        self._point_to(x, y, verb="Move")
         return self._inner.mouse_move(x, y, *args, **kwargs)
 
     def mouse_click(self, x: int, y: int, button: str = "left", click_count: int = 1,
                     *args: Any, **kwargs: Any) -> Any:
-        self._point_to(x, y)
+        self.overlay.checkpoint()
+        verb = _VERBS.get((button, click_count), "Click")
+        self._point_to(x, y, verb=verb, probe=True)
         result = self._inner.mouse_click(x, y, button, click_count, *args, **kwargs)
         self.overlay.click(button=button, count=click_count)
         self._follow_active_window()
@@ -77,21 +190,57 @@ class OverlayHAL:
 
     def mouse_drag(self, start_x: int, start_y: int, end_x: int, end_y: int,
                    duration_sec: float = 0.3, *args: Any, **kwargs: Any) -> Any:
-        self._point_to(start_x, start_y)
+        self.overlay.checkpoint()
+        self._point_to(start_x, start_y, verb="Drag", probe=True)
         # Follow the drag in parallel with the real one.
         self._point_to(end_x, end_y, ms=int(duration_sec * 1000), wait=False)
-        return self._inner.mouse_drag(start_x, start_y, end_x, end_y, duration_sec, *args, **kwargs)
+        result = self._inner.mouse_drag(start_x, start_y, end_x, end_y, duration_sec, *args, **kwargs)
+        self.overlay.clear_box()
+        return result
+
+    def mouse_scroll(self, dx: int, dy: int, *args: Any, **kwargs: Any) -> Any:
+        self.overlay.checkpoint()
+        direction = ("down" if dy < 0 else "up") if dy else ("right" if dx > 0 else "left")
+        self._intent(f"Scroll {direction}")
+        return self._inner.mouse_scroll(dx, dy, *args, **kwargs)
 
     # ------------------------------------------------------------ keyboard
     def keyboard_type(self, text: str, *args: Any, **kwargs: Any) -> Any:
+        self.overlay.checkpoint()
+        self._intent(typed_label(text))
         self.overlay.state("typing")
         try:
             return self._inner.keyboard_type(text, *args, **kwargs)
         finally:
             self.overlay.state("idle")
 
+    def keyboard_press_key(self, key_name: str, *args: Any, **kwargs: Any) -> Any:
+        self.overlay.checkpoint()
+        self._intent(f"Press {combo_label([key_name])}")
+        return self._inner.keyboard_press_key(key_name, *args, **kwargs)
+
+    def keyboard_hotkey(self, keys: List[str], *args: Any, **kwargs: Any) -> Any:
+        from .client import OverlayStopped
+
+        self.overlay.checkpoint()
+        label = combo_label(keys)
+        reason = danger_reason(keys) if self._confirm_danger else None
+        if reason is None:
+            self._intent(f"Press {label}")
+            return self._inner.keyboard_hotkey(keys, *args, **kwargs)
+        self.overlay.risk("danger")
+        self.overlay.intent(f"Press {label} ({reason})", ms=60000)
+        try:
+            if not self.overlay.confirm(f"Allow Dobby to press {label} and {reason}?"):
+                raise OverlayStopped(f"The user denied {label} ({reason})")
+            return self._inner.keyboard_hotkey(keys, *args, **kwargs)
+        finally:
+            self.overlay.risk("ok")
+            self.overlay.intent("", ms=0)
+
     # ------------------------------------------------------------- windows
     def focus_window(self, window_id: str, *args: Any, **kwargs: Any) -> Any:
+        self.overlay.checkpoint()
         ok = self._inner.focus_window(window_id, *args, **kwargs)
         if ok:
             self._tracked = str(window_id)
@@ -113,6 +262,15 @@ class OverlayHAL:
             return self._inner.capture_screen(*args, **kwargs)
         finally:
             self.overlay.show()
+            region = kwargs.get("region", args[0] if args else None)
+            rect = None
+            if region:
+                x, y, w, h = region
+                px, py = self._to_points(x, y)
+                qx, qy = self._to_points(x + w, y + h)
+                rect = (px, py, qx - px, qy - py)
+            self.overlay.scan(rect)  # helper uses the glowing window when rect is None
+            self.overlay.state("thinking")
 
 
 def unwrap(hal: Any) -> Any:

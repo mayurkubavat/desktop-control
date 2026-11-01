@@ -11,6 +11,19 @@ Look settings come from ``DOBBY_OVERLAY_COLOR`` (hex), ``DOBBY_OVERLAY_SPEED``
 (1.0 normal, 0 = no animation) and ``DOBBY_OVERLAY_LABEL``.
 ``DOBBY_OVERLAY_CAPTURE_VISIBLE=0`` hides the overlay from screen recordings
 too (default: recordings and screen shares show it).
+
+Controls: ``DOBBY_OVERLAY_RESUME=auto|manual`` (after user take-over, resume
+by itself after ``DOBBY_OVERLAY_IDLE_SECS`` of quiet, default 2, or wait for
+Resume), ``DOBBY_OVERLAY_TRAIL=0`` hides the numbered step trail,
+``DOBBY_OVERLAY_TRACKS=0`` stops writing replay tracks to
+``~/.dobby/overlay/tracks``.
+
+``DOBBY_OVERLAY_TURBO=1`` starts in Turbo mode (also a menu bar toggle): no
+Allow/Deny prompts for risky steps and no pause when you touch the mouse or
+keyboard; only Stop / Pause halt Dobby.
+
+Hotkeys while Dobby runs: Ctrl+Option+Esc stops, Ctrl+Option+P pauses or
+resumes.
 """
 
 from __future__ import annotations
@@ -20,12 +33,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .client import NullOverlay, OverlayClient
+import contextlib
+
+from .client import NullOverlay, OverlayClient, OverlayInterrupted, OverlayStopped
 from .hal import OverlayHAL, unwrap
 from .protocol import OVERLAY_WINDOW_TITLE, PROTOCOL_VERSION
 
 __all__ = [
-    "NullOverlay", "OverlayClient", "OverlayHAL", "unwrap", "make_overlay",
+    "NullOverlay", "OverlayClient", "OverlayHAL", "OverlayStopped", "OverlayInterrupted",
+    "unwrap", "make_overlay", "find_overlay_hal", "step",
     "wrap_hal", "overlay_enabled", "OVERLAY_WINDOW_TITLE", "PROTOCOL_VERSION",
 ]
 
@@ -56,6 +72,18 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         cfg["label"] = env["DOBBY_OVERLAY_LABEL"]
     if env.get("DOBBY_OVERLAY_CAPTURE_VISIBLE", "").strip().lower() in _FALSE:
         cfg["capture_visible"] = False
+    resume = env.get("DOBBY_OVERLAY_RESUME", "").strip().lower()
+    if resume in ("auto", "manual"):
+        cfg["takeover_resume"] = resume
+    if env.get("DOBBY_OVERLAY_IDLE_SECS"):
+        try:
+            cfg["idle_secs"] = max(0.5, float(env["DOBBY_OVERLAY_IDLE_SECS"]))
+        except ValueError:
+            pass
+    if env.get("DOBBY_OVERLAY_TURBO", "").strip().lower() in _TRUE:
+        cfg["turbo"] = True
+    if env.get("DOBBY_OVERLAY_TRAIL", "").strip().lower() in _FALSE:
+        cfg["trail"] = False
     if env.get("DOBBY_OVERLAY_SPEED"):
         try:
             cfg["speed"] = float(env["DOBBY_OVERLAY_SPEED"])
@@ -70,7 +98,10 @@ def make_overlay(enabled: Optional[bool] = None) -> NullOverlay:
     if not enabled:
         return NullOverlay()
     log_path = Path(os.path.expanduser("~/.dobby/logs/overlay.log"))
-    return OverlayClient(config=overlay_config(), log_path=log_path)
+    tracks = None
+    if os.environ.get("DOBBY_OVERLAY_TRACKS", "").strip().lower() not in _FALSE:
+        tracks = Path(os.path.expanduser("~/.dobby/overlay/tracks"))
+    return OverlayClient(config=overlay_config(), log_path=log_path, track_dir=tracks)
 
 
 def wrap_hal(hal: Any, overlay: Optional[NullOverlay] = None, **kwargs: Any) -> Any:
@@ -81,3 +112,25 @@ def wrap_hal(hal: Any, overlay: Optional[NullOverlay] = None, **kwargs: Any) -> 
     if isinstance(overlay, OverlayClient) or overlay.__class__ is not NullOverlay:
         return OverlayHAL(hal, overlay, **kwargs)
     return hal
+
+
+def find_overlay_hal(hal: Any) -> Optional[OverlayHAL]:
+    """Find the OverlayHAL inside a HAL or DesktopSession, if any."""
+    seen = 0
+    while hal is not None and seen < 5:
+        if isinstance(hal, OverlayHAL):
+            return hal
+        hal = getattr(hal, "__dict__", {}).get("backend")
+        seen += 1
+    return None
+
+
+def step(hal: Any, text: str, risk: Optional[str] = None, confirm: bool = False):
+    """``with step(hal, "Run synthesis", risk="caution"): ...`` for tool code.
+
+    Works with any HAL; a no-op context when the overlay is not in use.
+    """
+    ov = find_overlay_hal(hal)
+    if ov is None:
+        return contextlib.nullcontext()
+    return ov.step(text, risk=risk, confirm=confirm)

@@ -14,19 +14,32 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 #: Name given to every overlay panel, so window listings can filter them out.
 OVERLAY_WINDOW_TITLE = "Dobby Overlay"
 
 CURSOR_STATES = ("idle", "thinking", "typing", "waiting_user")
+RISK_LEVELS = ("ok", "caution", "danger")
+
+#: Events the helper sends unprompted: ``{"event": <name>, ...}``.
+EVENTS = ("stop", "pause", "resume", "user_input", "user_idle")
 
 # op -> (required fields, optional fields)
 OPS: Dict[str, tuple] = {
-    "cursor.move": (("x", "y"), ("ms",)),
+    "cursor.move": (("x", "y"), ("ms", "verb", "probe")),
     "cursor.click": ((), ("button", "count")),
     "cursor.state": (("state",), ()),
     "cursor.hide": ((), ()),
+    "intent": (("text",), ("ms",)),
+    "target.box": (("x", "y", "w", "h"), ()),
+    "target.clear": ((), ()),
+    "risk": (("level",), ()),
+    "scan": ((), ("x", "y", "w", "h")),
+    "trail.clear": ((), ()),
+    "confirm": (("text",), ("secs",)),
+    "confirm.cancel": ((), ()),
+    "overlay.visible": (("on",), ()),
     "glow.track": ((), ("window_id", "pid")),
     "glow.clear": ((), ()),
     "hide": ((), ()),
@@ -55,9 +68,19 @@ def validate(msg: Dict[str, Any]) -> Dict[str, Any]:
     extra = sorted(set(msg) - allowed)
     if extra:
         raise ProtocolError(f"{op}: unexpected {', '.join(extra)}")
-    for k in ("x", "y", "ms"):
-        if k in msg and not isinstance(msg[k], (int, float)):
+    for k in ("x", "y", "w", "h", "ms", "secs"):
+        if k in msg and (isinstance(msg[k], bool) or not isinstance(msg[k], (int, float))):
             raise ProtocolError(f"{op}: {k} must be a number")
+    for k in ("verb", "text"):
+        if k in msg and not isinstance(msg[k], str):
+            raise ProtocolError(f"{op}: {k} must be a string")
+    for k in ("probe", "on"):
+        if k in msg and not isinstance(msg[k], bool):
+            raise ProtocolError(f"{op}: {k} must be true or false")
+    if op == "risk" and msg["level"] not in RISK_LEVELS:
+        raise ProtocolError(f"risk: unknown level {msg['level']!r}")
+    if op == "scan" and 0 < len({"x", "y", "w", "h"} & set(msg)) < 4:
+        raise ProtocolError("scan: give all of x, y, w, h or none")
     if op == "cursor.state" and msg["state"] not in CURSOR_STATES:
         raise ProtocolError(f"cursor.state: unknown state {msg['state']!r}")
     if op == "glow.track" and msg.get("window_id") is None and msg.get("pid") is None:
@@ -86,6 +109,14 @@ def ack(msg_id: Any, ok: bool = True, error: Optional[str] = None) -> str:
     out: Dict[str, Any] = {"ack": msg_id, "ok": ok}
     if error:
         out["error"] = error
+    return json.dumps(out, separators=(",", ":")) + "\n"
+
+
+def event(name: str, **fields: Any) -> str:
+    if name not in EVENTS:
+        raise ProtocolError(f"unknown event: {name!r}")
+    out: Dict[str, Any] = {"event": name}
+    out.update(fields)
     return json.dumps(out, separators=(",", ":")) + "\n"
 
 

@@ -177,11 +177,16 @@ def detect_icon_boxes(
                 kept.append((int(bx), int(by), int(round(pw)), int(round(ph))))
             return kept
 
+        mode = (CONFIG.icon_detector or "auto").strip().lower()
+        can_contour = hasattr(grounder, "_generate_cv_proposals")
+        if mode == "contours" and can_contour:
+            return sorted(icons(_px_boxes(grounder._generate_cv_proposals(img, (0, 0)))),
+                          key=lambda bx: bx[2] * bx[3], reverse=True)
         raw = _px_boxes(grounder.generate_proposals(img, offset=(0, 0)))
         out = icons(raw)
         # The neural detector is unstable on macOS (fixed anchor boxes, or panels only):
         # when it gives few icon-sized boxes, use OpenCV contours instead.
-        if (looks_degenerate(raw) or len(out) < 3) and hasattr(grounder, "_generate_cv_proposals"):
+        if mode == "auto" and (looks_degenerate(raw) or len(out) < 3) and can_contour:
             logger.debug("icon detector gave %d icon boxes of %d; using contours", len(out), len(raw))
             out = icons(_px_boxes(grounder._generate_cv_proposals(img, (0, 0))))
     except Exception as e:
@@ -306,6 +311,7 @@ def decide_next_element(
     confirm: bool = True,
     confirm_at: float = 0.9,
     visual_fallback: bool = False,
+    visual_decider: Any = None,
 ) -> Dict[str, Any]:
     """
     Observes, shortlists elements by the goal, lets the local decider choose one,
@@ -329,7 +335,8 @@ def decide_next_element(
     candidates = shortlist(goal, state.elements, k=max(1, min(25, k)), text=lambda e: f"{e.role} {e.label}")
     if not candidates:
         out = {"generation": state.generation, "eid": None, "gate": {"verdict": "escalate", "reason": "no elements on screen"}}
-        return _visual_retry(out, controller, tracker, decider, goal, verb, authorized, app_name_filter) if visual_fallback else out
+        return _visual_retry(out, controller, tracker, visual_decider or decider, goal, verb, authorized,
+                             app_name_filter) if visual_fallback else out
     ctx = f"Goal: {goal.strip()}\n" + state.to_text(elements=[], max_text_lines=10)
     options = [e.describe() for e in candidates]
     decision = decider.choose(ctx, f"Which element should be used to {verb} next to advance the goal?", options)
@@ -360,7 +367,8 @@ def decide_next_element(
         "source": "text",
     }
     if visual_fallback and result.verdict == Verdict.ESCALATE:
-        return _visual_retry(out, controller, tracker, decider, goal, verb, authorized, app_name_filter)
+        return _visual_retry(out, controller, tracker, visual_decider or decider, goal, verb, authorized,
+                             app_name_filter)
     return out
 
 

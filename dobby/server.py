@@ -156,6 +156,8 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "get_screen_state": ("advanced_vision", "Numbered text-only view of the active window (AX + OCR) with valid operations"),
     "act_on_element": ("advanced_vision", "Clicks or types on a screen-state element after re-binding it on a fresh frame"),
     "decide_next_element": ("advanced_vision", "Local Gemma picks the next screen-state element for a goal, gated by risk"),
+    "get_model_roles": ("advanced_vision", "Shows which local model does each job and which candidates are installed"),
+    "set_model_role": ("advanced_vision", "Points one job (text, vision, visual_pick, triage) at another local model"),
     "decide_visual_element": ("advanced_vision", "Local Gemma picks a control from a marked-up screenshot when it has no text label"),
     "choose_option": ("advanced_vision", "Local Gemma picks one option with calibrated probabilities, gated by risk"),
     "read_screen_text": ("core", "Extracts screen text via local OCR"),
@@ -902,7 +904,7 @@ def choose_option(
     picked = shortlist(goal, list(options), k=k) if len(options) > k else list(options)
     ctx = f"Goal: {goal.strip()}" + (f"\nScreen state:\n{state.strip()}" if state.strip() else "")
     try:
-        decision = grounder.decider().choose(ctx, question, picked)
+        decision = grounder.decider(role="text").choose(ctx, question, picked)
     except (GemmaError, ValueError) as e:
         return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
     result = gate(decision, verb, authorized=authorized)
@@ -1026,10 +1028,55 @@ def decide_next_element(
     if grounder is None:
         return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
     try:
-        return _decide(controller, _tracker(), grounder.decider(), goal, verb=verb, authorized=authorized,
-                       k=shortlist_to, app_name_filter=app_name_filter, visual_fallback=visual_fallback)
+        return _decide(controller, _tracker(), grounder.decider(role="text"), goal, verb=verb, authorized=authorized,
+                       k=shortlist_to, app_name_filter=app_name_filter, visual_fallback=visual_fallback,
+                       visual_decider=grounder.decider(role="visual_pick"))
     except (GemmaError, ValueError) as e:
         return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
+
+
+@mcp_server.tool()
+def get_model_roles() -> Dict[str, Any]:
+    """
+    Which local model does each job (text, vision, visual_pick, triage), where that
+    choice came from (env, runtime, ~/.dobby/models.json, config, default), whether it
+    is installed in Ollama, and known candidate models. Nothing is downloaded.
+    """
+    from dobby.local_models import KNOWN_MODELS, MODELS_FILE, roles_table
+
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    installed = grounder.client.installed_models() if grounder is not None else None
+    return {
+        "roles": roles_table(installed),
+        "models_file": str(MODELS_FILE),
+        "icon_detector": CONFIG.icon_detector,
+        "candidates": [dict(p.as_dict(), installed=(p.tag in installed) if installed is not None else None)
+                       for p in KNOWN_MODELS],
+    }
+
+
+@mcp_server.tool()
+def set_model_role(role: str, model: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Points one job at another local Ollama model for this server session, e.g.
+    set_model_role("visual_pick", "qwen2.5vl:7b"). An empty model clears the override.
+    Refuses a model that is not installed (pull it yourself first). For a lasting
+    choice, write ~/.dobby/models.json or set DOBBY_MODEL_<ROLE> in the client config.
+
+    Args:
+        role: "text", "vision", "visual_pick" or "triage".
+        model: Ollama tag, or empty to go back to the configured model.
+    """
+    from dobby.local_models import set_role
+
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if model and grounder is not None and not grounder.client.has_model(model):
+        return {"success": False, "error": f"'{model}' is not installed in Ollama; pull it first", "role": role}
+    try:
+        now = set_role(role, model)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    return {"success": True, "role": role, "model": now, "is_override": bool(model)}
 
 
 @mcp_server.tool()
@@ -1062,7 +1109,7 @@ def decide_visual_element(
     if grounder is None:
         return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
     try:
-        return _visual(controller, _tracker(), grounder.decider(), goal, verb=verb, authorized=authorized,
+        return _visual(controller, _tracker(), grounder.decider(role="visual_pick"), goal, verb=verb, authorized=authorized,
                        max_marks=max_marks, app_name_filter=app_name_filter)
     except (GemmaError, ValueError) as e:
         return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}

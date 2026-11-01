@@ -165,6 +165,14 @@ class VisionConfig(BaseModel):
         default="gemma3:4b",
         description="Model identifier for text modal risk triage. gemma3:4b avoids loading a second model.",
     )
+    model_text: str = Field(default="", description="Model for the 'text' role (empty: gemma3_text_model). See dobby/local_models.py.")
+    model_vision: str = Field(default="", description="Model for the 'vision' role (empty: gemma3_vision_model).")
+    model_visual_pick: str = Field(default="", description="Model for the 'visual_pick' role (empty: gemma3_vision_model).")
+    model_triage: str = Field(default="", description="Model for the 'triage' role (empty: gemma3_text_model).")
+    icon_detector: str = Field(
+        default="auto",
+        description="Icon boxes for screen state: 'auto' (neural, contours when it misbehaves), 'onnx', or 'contours'.",
+    )
     gemma3_dhash_threshold: int = Field(
         default=4,
         description="Perceptual hash Hamming distance threshold for semantic ROI cache hits.",

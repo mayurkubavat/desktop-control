@@ -165,18 +165,24 @@ class GemmaMarkLabeler:
     def __init__(
         self,
         client: GemmaClient,
-        vision_model: str = CONFIG.gemma3_vision_model,
+        vision_model: Optional[str] = None,
         max_side: int = CONFIG.gemma3_visual_max_side,
         max_marks: int = CONFIG.gemma3_max_marks,
         timeout: Optional[float] = None,
     ) -> None:
         self.client = client
-        self.vision_model = vision_model
+        self._vision_model = vision_model
         self.max_side = max_side
         self.max_marks = max_marks
         self.timeout = timeout
         self.cache = MarkLabelCache(threshold=CONFIG.gemma3_dhash_threshold)
         self.cache_hits = 0
+
+    @property
+    def vision_model(self) -> str:
+        from dobby.local_models import model_for
+
+        return self._vision_model or model_for("vision")
 
     def label_marks(self, image: Image.Image, boxes: Sequence[Box], app_key: str = "default") -> Dict[int, Dict[str, str]]:
         """

@@ -32,6 +32,7 @@ Rules that hold for every rung:
 
 ## References (read when needed)
 
+- Local models are plug and play per role (text, vision, visual_pick, triage): `get_model_roles` shows what runs where, `set_model_role` swaps one for this session, and `scripts/bench_models.py` compares candidates before you switch. See README "Local models".
 - `references/tools.md`: every tool with exact parameters and defaults, grouped by toolset. Generated from the server code.
 - `references/gemma-tiers.md`: what the local model does in each tool, its settings and measured latency.
 - `references/zero-token-element-discovery.md`: recipes for finding elements without images.

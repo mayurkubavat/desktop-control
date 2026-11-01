@@ -193,8 +193,8 @@ class Gemma3Grounder:
     def __init__(
         self,
         endpoint: str = CONFIG.gemma3_endpoint,
-        vision_model: str = CONFIG.gemma3_vision_model,
-        text_model: str = CONFIG.gemma3_text_model,
+        vision_model: Optional[str] = None,
+        text_model: Optional[str] = None,
         dhash_threshold: int = CONFIG.gemma3_dhash_threshold,
         cache_capacity: int = CONFIG.gemma3_cache_capacity,
         timeout: float = CONFIG.gemma3_timeout_seconds,
@@ -206,14 +206,35 @@ class Gemma3Grounder:
             keep_alive=CONFIG.gemma3_keep_alive,
         )
         self.endpoint = self.client.base_url
-        self.vision_model = vision_model
-        self.text_model = text_model
+        # None follows the role settings live (env, set_model_role, ~/.dobby/models.json, CONFIG).
+        self._vision_model = vision_model
+        self._text_model = text_model
         self.timeout = timeout
         self.cache = SemanticROICache(capacity=cache_capacity, threshold=dhash_threshold)
         self.cache_hits = 0
         from dobby.vdom.gemma_marks import GemmaMarkLabeler
 
         self.marks = GemmaMarkLabeler(self.client, vision_model=vision_model, timeout=timeout)
+
+    @property
+    def vision_model(self) -> str:
+        from dobby.local_models import model_for
+
+        return self._vision_model or model_for("vision")
+
+    @vision_model.setter
+    def vision_model(self, value: Optional[str]) -> None:
+        self._vision_model = value
+
+    @property
+    def text_model(self) -> str:
+        from dobby.local_models import model_for
+
+        return self._text_model or model_for("triage")
+
+    @text_model.setter
+    def text_model(self, value: Optional[str]) -> None:
+        self._text_model = value
 
     def is_available(self) -> bool:
         """True when Ollama is reachable and both configured models are installed (exact names)."""
@@ -485,11 +506,16 @@ class Gemma3Grounder:
                 result["confidence"] = min(confidence, CONFIG.gemma3_unverified_text_cap)
         return result
 
-    def decider(self, timeout: Optional[float] = None):
-        """A :class:`~dobby.gemma.decide.GemmaDecider` on this grounder's vision model."""
+    def decider(self, timeout: Optional[float] = None, role: str = "vision"):
+        """
+        A :class:`~dobby.gemma.decide.GemmaDecider` for a model role: "text" (screen-state
+        choices), "vision" (crop checks, the default) or "visual_pick" (Set-of-Marks).
+        """
         from dobby.gemma.decide import GemmaDecider
+        from dobby.local_models import model_for
 
-        return GemmaDecider(self.client, model=self.vision_model, timeout=timeout or self.timeout)
+        model = self._vision_model if (role == "vision" and self._vision_model) else model_for(role)
+        return GemmaDecider(self.client, model=model, timeout=timeout or self.timeout)
 
     def _yes_no_logprob(
         self,

@@ -233,6 +233,24 @@ Record new ones from a live session with `start_cassette_recording` / `stop_cass
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
+## Local models (plug and play)
+
+Dobby works with any model served by Ollama. Each job has a role with its own model:
+`text` (choices over the text screen state), `vision` (yes/no on crops), `visual_pick`
+(lettered boxes on a screenshot) and `triage` (dialog text). All default to `gemma3:4b`.
+
+Swap a role without code changes, first match wins:
+
+1. `DOBBY_MODEL_<ROLE>=qwen2.5vl:7b` in the MCP client's env
+2. `set_model_role("visual_pick", "qwen2.5vl:7b")` at runtime (advanced_vision toolset)
+3. `~/.dobby/models.json`, e.g. `{"vision": "qwen2.5vl:7b", "visual_pick": "qwen3-vl:8b"}` (re-read on change)
+4. `CONFIG.model_<role>`, else the `gemma3_*` defaults
+
+Compare candidates first: `python scripts/bench_models.py --models gemma3:4b,qwen2.5vl:7b`.
+It scores accuracy, confident mistakes and whether a model says "none" when the target is
+absent. `get_model_roles` lists roles, sources and known candidates (`dobby/local_models.py`).
+Nothing downloads models; pull them yourself after checking `~/LocalAI/MODELS.md`.
+
 ## ADK pipeline (optional)
 
 `pip install -e '.[adk]'`, then `python -m dobby.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/dobby/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.

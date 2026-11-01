@@ -2,7 +2,7 @@
 
 # Dobby MCP tools
 
-54 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
+56 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
 
 ## core
 
@@ -61,6 +61,8 @@
 | `get_screen_state` | `app_name_filter=None`, `use_ocr=True`, `max_elements=60`, `as_text=True`, `settle=True`, `include_icons=False` | Observes the active window as a numbered, text-only list of elements (e1, e2, ...) merged from the accessibility tree and OCR, with the operations valid right now (``type`` only when an editable, non-secure field has focus). No image tokens. |
 | `act_on_element` | `eid`, `generation`, `action='click'`, `text=None`, `press_enter=False`, `app_name_filter=None` | Clicks, double-clicks or types on an element from get_screen_state, after re-binding it on a fresh observation (by role and label, nearest to its old place). |
 | `decide_next_element` | `goal`, `verb='click'`, `authorized=False`, `shortlist_to=12`, `app_name_filter=None`, `visual_fallback=True` | Observes the screen, shortlists elements by word overlap with the goal, and lets the local Gemma pick one (probabilities from logprobs), gated by the verb's risk. A second yes/no question confirms the pick; if it disagrees, the verdict becomes "escalate" (the right target may not be on screen). The app's menu bar is included. Nothing is clicked. When ``gate.verdict`` is "act", call act_on_element with the returned ``eid`` and ``generation``; "escalate" means decide yourself; "stop" means do not act. |
+| `get_model_roles` | none | Which local model does each job (text, vision, visual_pick, triage), where that choice came from (env, runtime, ~/.dobby/models.json, config, default), whether it is installed in Ollama, and known candidate models. Nothing is downloaded. |
+| `set_model_role` | `role`, `model=None` | Points one job at another local Ollama model for this server session, e.g. set_model_role("visual_pick", "qwen2.5vl:7b"). An empty model clears the override. Refuses a model that is not installed (pull it yourself first). For a lasting choice, write ~/.dobby/models.json or set DOBBY_MODEL_<ROLE> in the client config. |
 | `decide_visual_element` | `goal`, `verb='click'`, `authorized=False`, `max_marks=20`, `app_name_filter=None` | Picks a control from a screenshot when the text view has no name for it (toolbar icons, canvas apps, custom widgets). The icon detector adds boxes the accessibility tree missed; local Gemma sees the window with lettered boxes and picks a letter (probabilities from logprobs), then a close-up yes/no check confirms it. Click points come from the boxes, never from the model. Nothing is clicked: when ``gate.verdict`` is "act", call act_on_element with the returned ``eid`` and ``generation``. |
 | `find_visual_element` | `description`, `region=None` | Finds an element by description where accessibility gives no names (canvases, custom Qt/Tk widgets, EDA toolbars). Tries local OCR for a visible-text match first; otherwise the local detector proposes boxes, local Gemma picks one by number, and the click point comes from the detector box, never from the model. No image is returned. |
 

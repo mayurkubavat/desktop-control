@@ -92,3 +92,13 @@ def occluded(target: Rect, above: Iterable[Rect], min_fraction: float = 0.25) ->
         if w > 0 and h > 0:
             covered += w * h
     return covered / area >= min_fraction
+
+
+def chip_rect(tip: Point, width: float, arrow_w: float, arrow_h: float, chip_h: float,
+              gap: float = 4.0) -> Rect:
+    """Global top-left rect of the name tag drawn below-right of the pointer tip.
+
+    Matches the helper's layout: the tag's top-left sits ``arrow_w - gap``
+    right of the tip and ``arrow_h + gap`` below it.
+    """
+    return (tip[0] + arrow_w - gap, tip[1] + arrow_h + gap, float(width), float(chip_h))

@@ -649,3 +649,55 @@ def test_annotate_chip_grows_with_detail_and_uses_risk_colour():
     red = annotate(bg, TrackState(cursor=(10, 0), risk="danger"))
     r, g, b = red.getpixel((30, 22 + 18))
     assert r > 200 and g < 150
+
+
+def test_overlay_config_pill_options():
+    from dobby.overlay import overlay_config
+
+    assert "pill" not in overlay_config({})
+    assert overlay_config({"DOBBY_OVERLAY_PILL": "auto"})["pill"] == "auto"
+    assert overlay_config({"DOBBY_OVERLAY_PILL": "0"})["pill"] == "off"
+    assert overlay_config({"DOBBY_OVERLAY_PILL_RECORD": "1"})["pill_in_recordings"] is True
+
+
+def test_client_start_async_starts_one_helper(fake_client):
+    client, log = fake_client
+    client.start_async()
+    client.start_async()
+    deadline = time.time() + 5
+    while not client.active and time.time() < deadline:
+        time.sleep(0.02)
+    assert client.active
+    pid = client.pid
+    assert client.move(1, 2, ms=0) is True
+    assert client.pid == pid
+
+
+def test_wrap_hal_starts_overlay_early_only_for_always_bar():
+    from dobby.overlay import wrap_hal
+    from dobby.overlay.client import OverlayClient
+
+    class Probe(OverlayClient):
+        def __init__(self, cfg):
+            super().__init__(cmd=["true"], config=cfg)
+            self.started = 0
+
+        def start_async(self):
+            self.started += 1
+
+    always, auto = Probe({}), Probe({"pill": "auto"})
+    wrap_hal(object(), always)
+    wrap_hal(object(), auto)
+    assert always.started == 1 and auto.started == 0
+
+
+def test_bar_owner_lock_is_exclusive_and_handed_over(tmp_path):
+    from dobby.overlay.barlock import BarOwner
+
+    path = str(tmp_path / "bar.lock")
+    a, b = BarOwner(path), BarOwner(path)
+    assert a.try_acquire() and a.owned
+    assert not b.try_acquire() and not b.owned
+    a.release()
+    assert b.try_acquire()
+    b.release()

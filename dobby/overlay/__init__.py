@@ -84,6 +84,13 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         cfg["turbo"] = True
     if env.get("DOBBY_OVERLAY_TRAIL", "").strip().lower() in _FALSE:
         cfg["trail"] = False
+    pill = env.get("DOBBY_OVERLAY_PILL", "").strip().lower()
+    if pill in ("always", "auto", "off"):
+        cfg["pill"] = pill
+    elif pill in _FALSE:
+        cfg["pill"] = "off"
+    if env.get("DOBBY_OVERLAY_PILL_RECORD", "").strip().lower() in _TRUE:
+        cfg["pill_in_recordings"] = True
     if env.get("DOBBY_OVERLAY_SPEED"):
         try:
             cfg["speed"] = float(env["DOBBY_OVERLAY_SPEED"])
@@ -110,6 +117,8 @@ def wrap_hal(hal: Any, overlay: Optional[NullOverlay] = None, **kwargs: Any) -> 
         return hal
     overlay = overlay if overlay is not None else make_overlay()
     if isinstance(overlay, OverlayClient) or overlay.__class__ is not NullOverlay:
+        if isinstance(overlay, OverlayClient) and overlay.config.get("pill", "always") == "always":
+            overlay.start_async()  # show the control bar as soon as Dobby runs
         return OverlayHAL(hal, overlay, **kwargs)
     return hal
 

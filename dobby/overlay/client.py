@@ -121,6 +121,7 @@ class OverlayClient(NullOverlay):
         self._track = None
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self._start_lock = threading.RLock()  # one helper even with an eager start
         self._next_id = 1
         self._waiters: Dict[int, threading.Event] = {}
         self._results: Dict[int, bool] = {}
@@ -155,7 +156,22 @@ class OverlayClient(NullOverlay):
         self._release_waits()
 
     # --------------------------------------------------------------- process
+    def start_async(self) -> None:
+        """Start the helper in the background (instead of on the first action)."""
+        threading.Thread(target=self._start_quietly, name="dobby-overlay-start", daemon=True).start()
+
+    def _start_quietly(self) -> None:
+        try:
+            self._ensure_started()
+        except Exception as exc:  # noqa: BLE001 - cosmetic
+            log.debug("overlay eager start failed: %s", exc)
+
+    # --------------------------------------------------------------- process
     def _ensure_started(self) -> bool:
+        with self._start_lock:
+            return self._ensure_started_locked()
+
+    def _ensure_started_locked(self) -> bool:
         if self._disabled:
             return False
         if self._proc is not None:

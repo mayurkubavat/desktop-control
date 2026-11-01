@@ -22,6 +22,8 @@ from dobby.screen_state.state import ScreenElement, StateTracker
 logger = logging.getLogger(__name__)
 
 MAX_MARKS = 20  # letters A..T, plus "None of these"
+VISUAL_MIN_P = 0.85  # stricter than the text lane: boxes carry no names to anchor the choice
+VISUAL_MAY_ACT = False  # flip once cassette calibration shows the visual lane can say "none"
 
 
 def _candidates(elements: List[ScreenElement], window: Tuple[int, int, int, int], limit: int) -> List[ScreenElement]:
@@ -37,7 +39,13 @@ def _candidates(elements: List[ScreenElement], window: Tuple[int, int, int, int]
         cx, cy = e.center
         return e.position != "menu bar" and wx <= cx < wx + ww and wy <= cy < wy + wh
 
-    shown = [e for e in elements if inside(e)]
+    def chrome(e: ScreenElement) -> bool:
+        # Window controls (close / minimize / zoom) live in the title bar's left corner
+        # and are unlabeled on macOS: never offer them as a visual pick.
+        cx, cy = e.center
+        return cy - wy < 30 and cx - wx < 90 and e.role in ("push button", "icon", "button")
+
+    shown = [e for e in elements if inside(e) and not chrome(e)]
     unnamed = [e for e in shown if e.source == "detector" or not e.label]
     named = [e for e in shown if e not in unnamed and e.role != "text"]
     return (unnamed + named)[: max(1, limit)]
@@ -107,6 +115,8 @@ def decide_visual_element(
     )
     target = None if decision.is_none else cands[decision.index]
     result = gate(decision, verb, authorized=authorized)
+    if result.act and decision.p < VISUAL_MIN_P:
+        result = GateResult(Verdict.ESCALATE, f"visual pick below {VISUAL_MIN_P:.2f} (p={decision.p:.2f})", result.risk)
 
     confirmation = None
     if confirm and target is not None and result.act:
@@ -124,6 +134,11 @@ def decide_visual_element(
         if confirmation is None or confirmation.p_true < confirm_at:
             p_txt = "failed" if confirmation is None else f"p={confirmation.p_true:.2f} < {confirm_at:.2f}"
             result = GateResult(Verdict.ESCALATE, f"close-up check disagrees ({p_txt})", result.risk)
+
+    if result.act and not VISUAL_MAY_ACT:
+        # Live tests: Gemma 4B picked a wrong box with p~1.0 and a confirming close-up,
+        # even when no box was right. Until the visual lane is calibrated it only suggests.
+        result = GateResult(Verdict.ESCALATE, "visual pick is a suggestion only: check eid before acting", result.risk)
 
     return {
         "generation": state.generation,

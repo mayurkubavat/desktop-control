@@ -227,16 +227,16 @@ class FakeOllama:
 
 
 def test_visual_choice_marks_icons_and_maps_letter_to_eid():
-    ctl = FakeController([node("push button", "Save", 300, 250)], icons=[(10, 10, 24, 24), (50, 10, 24, 24)])
+    ctl = FakeController([node("push button", "Save", 300, 250)], icons=[(110, 60, 24, 24), (150, 60, 24, 24)])
     fake = FakeOllama(letter="B")
     out = decide_visual_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "zoom to fit")
-    assert out["marks"] == 3 and out["gate"]["verdict"] == "act"
-    assert out["element"]["source"] == "detector" and out["element"]["bbox"]["x"] == 50
+    assert out["marks"] == 3 and out["gate"]["verdict"] == "escalate" and "suggestion" in out["gate"]["reason"]
+    assert out["element"]["source"] == "detector" and out["element"]["bbox"]["x"] == 150
     assert all("images" in b["messages"][1] for b in fake.bodies) and len(fake.bodies) == 2  # choice + close-up
 
 
 def test_visual_choice_close_up_no_escalates():
-    ctl = FakeController([], icons=[(10, 10, 24, 24)])
+    ctl = FakeController([], icons=[(110, 60, 24, 24)])
     out = decide_visual_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=FakeOllama(yes=0.1))), "zoom")
     assert out["gate"]["verdict"] == "escalate" and "close-up" in out["gate"]["reason"]
 
@@ -260,7 +260,7 @@ def test_visual_choice_skips_menu_bar_and_off_window_elements():
     ctl = FakeController([node("menu item", "View", 60, 0, 40, 22), node("push button", "", 120, 120, 30, 30)], hal=hal)
     fake = FakeOllama(letter="A")
     out = decide_visual_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "open search")
-    assert out["marks"] == 1 and out["element"]["bbox"]["x"] == 120 and out["gate"]["verdict"] == "act"
+    assert out["marks"] == 1 and out["element"]["bbox"]["x"] == 120 and out["gate"]["verdict"] == "escalate"
 
 
 def test_degenerate_detector_falls_back_to_contours_and_scales_retina():
@@ -286,3 +286,24 @@ def test_settle_auto_only_right_after_an_action():
     assert observe(ctl, t, settle="auto").settle is None
     t.mark_action()
     assert observe(ctl, t, settle="auto").settle["settled"]
+
+
+def test_visual_lane_never_offers_window_controls_or_frame_corners():
+    from dobby.screen_state.observe import detect_icon_boxes
+
+    hal = FakeHAL()
+    ctl = FakeController([node("push button", "", 8, 6, 14, 14),           # close button (title bar, left)
+                          node("push button", "", 200, 150, 30, 30)], hal=hal)
+    out = decide_visual_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=FakeOllama())), "do it")
+    assert out["marks"] == 1 and out["element"]["bbox"]["x"] == 200
+
+    class Grounder:
+        def generate_proposals(self, image, offset=(0, 0)):
+            return [{"bbox": {"x": 0, "y": 0, "width": 22, "height": 19}},        # window corner
+                    {"bbox": {"x": 376, "y": 278, "width": 24, "height": 22}},    # opposite corner
+                    {"bbox": {"x": 100, "y": 100, "width": 24, "height": 24}},
+                    {"bbox": {"x": 150, "y": 100, "width": 24, "height": 24}},
+                    {"bbox": {"x": 200, "y": 100, "width": 24, "height": 24}}]
+
+    boxes = detect_icon_boxes(SimpleNamespace(hal=FakeHAL(), neural_grounder=Grounder()), (0, 0, 400, 300))
+    assert sorted(b[0] for b in boxes) == [100, 150, 200]

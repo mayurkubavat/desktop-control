@@ -158,24 +158,35 @@ def detect_icon_boxes(
         return []
     try:
         img = controller.hal.capture_screen(region=region)
-        boxes = _px_boxes(grounder.generate_proposals(img, offset=(0, 0)))
-        if looks_degenerate(boxes) and hasattr(grounder, "_generate_cv_proposals"):
-            logger.debug("icon detector output looks degenerate (%d boxes); using contours", len(boxes))
-            boxes = _px_boxes(grounder._generate_cv_proposals(img, (0, 0)))
+        rx, ry, rw, rh = region
+        sx = img.width / float(rw) if rw else 1.0
+        sy = img.height / float(rh) if rh else 1.0
+
+        def icons(px: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
+            kept = []
+            for x, y, w, h in px:
+                pw, ph = w / sx, h / sy
+                if not (min_side <= pw <= max_side and min_side <= ph <= max_side):
+                    continue
+                if max(pw, ph) / max(1.0, min(pw, ph)) > max_aspect:
+                    continue
+                bx, by = rx + x / sx, ry + y / sy
+                # Boxes hugging the window frame are corners/edges of the window, not controls.
+                if bx - rx < 4 or by - ry < 4 or (rx + rw) - (bx + pw) < 4 or (ry + rh) - (by + ph) < 4:
+                    continue
+                kept.append((int(bx), int(by), int(round(pw)), int(round(ph))))
+            return kept
+
+        raw = _px_boxes(grounder.generate_proposals(img, offset=(0, 0)))
+        out = icons(raw)
+        # The neural detector is unstable on macOS (fixed anchor boxes, or panels only):
+        # when it gives few icon-sized boxes, use OpenCV contours instead.
+        if (looks_degenerate(raw) or len(out) < 3) and hasattr(grounder, "_generate_cv_proposals"):
+            logger.debug("icon detector gave %d icon boxes of %d; using contours", len(out), len(raw))
+            out = icons(_px_boxes(grounder._generate_cv_proposals(img, (0, 0))))
     except Exception as e:
         logger.debug("icon detector unavailable: %s", e)
         return []
-    rx, ry, rw, rh = region
-    sx = img.width / float(rw) if rw else 1.0
-    sy = img.height / float(rh) if rh else 1.0
-    out = []
-    for x, y, w, h in boxes:
-        pw, ph = w / sx, h / sy
-        if not (min_side <= pw <= max_side and min_side <= ph <= max_side):
-            continue
-        if max(pw, ph) / max(1.0, min(pw, ph)) > max_aspect:
-            continue
-        out.append((int(rx + x / sx), int(ry + y / sy), int(round(pw)), int(round(ph))))
     out.sort(key=lambda bx: bx[2] * bx[3], reverse=True)
     return out
 

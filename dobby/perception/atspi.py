@@ -260,6 +260,24 @@ class ATSPIInspector:
             return None
         return box if _valid(*box) else None
 
+    def _states(self, node: Any) -> List[str]:
+        """Same state words as the macOS inspector: focused, enabled/disabled, selected, checked."""
+        out: List[str] = []
+        try:
+            st = node.get_state_set()
+            T = self._atspi.StateType
+            if st.contains(T.FOCUSED):
+                out.append("focused")
+            enabled = st.contains(T.ENABLED) or st.contains(T.SENSITIVE)
+            out.append("enabled" if enabled else "disabled")
+            if st.contains(T.SELECTED):
+                out.append("selected")
+            if st.contains(T.CHECKED):
+                out.append("checked")
+        except Exception:
+            pass
+        return out
+
     def _showing(self, node: Any) -> bool:
         try:
             states = node.get_state_set()
@@ -411,14 +429,17 @@ class ATSPIInspector:
                 x, y, w, h = box
                 is_collapsed_menu = role.lower() == "menu item" and h <= 14
                 if w > 8 and h > 8 and w * h >= CONFIG.som_min_element_area and not is_collapsed_menu:
-                    if not filter_interactable or is_interactable:
+                    if not filter_interactable or is_interactable or role == "dialog":
+                        if not name.strip():
+                            name = _safe(lambda: node.get_description()) or ""
                         elements.append(
                             UIElement(
                                 id=len(elements) + 1,
                                 role=role,
-                                name=name.strip(),
+                                name=name.strip()[:200],
                                 bbox=BoundingBox(x=x, y=y, width=w, height=h),
                                 interactable=is_interactable,
+                                states=self._states(node),
                             )
                         )
             for c in range(node.get_child_count()):

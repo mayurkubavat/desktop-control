@@ -271,3 +271,33 @@ def test_factory_without_display_fails_closed():
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     assert "closed True" in out.stdout
+
+
+def test_screen_state_loop_end_to_end(hal, spawn):
+    """observe -> type -> click, through the same screen-state code the MCP tools use."""
+    from dobby.agent_loop.controller import FeedbackLoopController
+    from dobby.screen_state import StateTracker
+    from dobby.screen_state.observe import act_on_element, observe
+
+    win, proc = spawn("--entry", capture=True)
+    hal.focus_window(win.window_id)
+    ctl = FeedbackLoopController(hal)
+    if not ctl.atspi_inspector.is_available:
+        pytest.skip("AT-SPI unavailable")
+    tracker = StateTracker()
+    state = _wait_for(lambda: (lambda s: s if any(e.label == "OK" for e in s.elements) else None)(
+        observe(ctl, tracker, use_ocr=False)))
+    assert state is not None
+    assert state.app == "zenity" or (state.window_title or "").startswith("dobby-")
+    entry = next(e for e in state.elements if e.source == "ax" and e.role == "text")
+    assert entry.focused, "the entry starts focused in a zenity --entry dialog"
+    assert "type" in state.as_dict()["operations"]
+
+    r = act_on_element(ctl, tracker, entry.eid, state.generation, action="type", text="Dobby")
+    assert r["ok"], r
+    state2 = observe(ctl, tracker, use_ocr=False)
+    ok = next(e for e in state2.elements if e.label == "OK")
+    r = act_on_element(ctl, tracker, ok.eid, state2.generation, action="click")
+    assert r["ok"], r
+    out, _ = proc.communicate(timeout=5)
+    assert out.strip() == "Dobby"

@@ -11,7 +11,7 @@ Replaces naive auto-clicking with risk-aware semantic triage:
 import re
 import time
 import logging
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Callable
 
 from vision_mcp.hal.base import IDesktopHAL
 from vision_mcp.perception.atspi import ATSPIInspector
@@ -25,6 +25,9 @@ from vision_mcp.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# (dialog_text, button_labels) -> {"risk_tier", "suggested_button", "confidence", "reason", "source"}
+ModalClassifier = Callable[[str, List[str]], Dict[str, Any]]
 
 
 class SemanticModalRouter:
@@ -49,6 +52,29 @@ class SemanticModalRouter:
         re.IGNORECASE,
     )
 
+    # Buttons a model verdict may ever press on its own. Anything else escalates.
+    SAFE_DISMISS_LABELS = {
+        "ok", "close", "got it", "dismiss", "x", "no thanks", "acknowledge", "not now", "later", "skip",
+    }
+
+    def __init__(self, classifier: Optional[ModalClassifier] = None, min_confidence: float = 0.8) -> None:
+        self.classifier = classifier
+        self.min_confidence = min_confidence
+        self.last_source = "rules"
+        self.last_reason: Optional[str] = None
+
+    def _ask_classifier(self, text: str, buttons: List[ModalButtonOption]) -> Optional[Dict[str, Any]]:
+        if self.classifier is None:
+            return None
+        try:
+            verdict = self.classifier(text, [b.label for b in buttons])
+        except Exception as e:  # a classifier failure must never auto-click
+            logger.warning(f"Modal classifier failed: {e}")
+            return None
+        if not isinstance(verdict, dict) or verdict.get("source") != "gemma":
+            return None
+        return verdict
+
     def classify_and_route(
         self,
         window_title: str,
@@ -63,6 +89,8 @@ class SemanticModalRouter:
         """
         combined_text = f"{window_title} {body_text}".strip()
         btn_labels = [b.label.lower().strip() for b in buttons]
+        self.last_source = "rules"
+        self.last_reason = None
 
         # 1. Tier 3: Destructive mutation or system/license errors (Highest Priority)
         if self.DESTRUCTIVE_KEYWORDS.search(combined_text):
@@ -96,6 +124,41 @@ class SemanticModalRouter:
                 buttons[0].inferred_consequence = "Safe acknowledgment"
                 return (ModalRiskTier.INFORMATIVE_ACK, buttons[0], None)
 
+        # 3b. Tie-breaker: no rule matched at all, so ask the local model. It may
+        # only (a) make the verdict stricter, or (b) approve a known-safe dismiss
+        # button with high confidence. Every other outcome escalates as before.
+        if not self.BRANCHING_KEYWORDS.search(combined_text):
+            verdict = self._ask_classifier(combined_text, buttons)
+            if verdict is not None:
+                tier_value = verdict.get("risk_tier")
+                self.last_source = "gemma"
+                self.last_reason = verdict.get("reason")
+                if tier_value == ModalRiskTier.DESTRUCTIVE_OR_SYSTEM.value:
+                    for b in buttons:
+                        b.inferred_consequence = (
+                            "Safe abort" if re.search(r"\b(cancel|no|abort|exit)\b", b.label, re.IGNORECASE)
+                            else "Destructive state mutation (model verdict)"
+                        )
+                    payload = ModalEscalationPayload(
+                        window_title=window_title,
+                        dialog_body_text=body_text,
+                        risk_tier=ModalRiskTier.DESTRUCTIVE_OR_SYSTEM,
+                        detected_buttons=buttons,
+                    )
+                    return (ModalRiskTier.DESTRUCTIVE_OR_SYSTEM, None, payload)
+
+                suggested = (verdict.get("suggested_button") or "").lower().strip()
+                confident = float(verdict.get("confidence") or 0.0) >= self.min_confidence
+                if (
+                    tier_value in (ModalRiskTier.BENIGN_DISMISSIBLE.value, ModalRiskTier.INFORMATIVE_ACK.value)
+                    and confident
+                    and suggested in self.SAFE_DISMISS_LABELS
+                ):
+                    btn = next((b for b in buttons if b.label.lower().strip() == suggested), None)
+                    if btn is not None:
+                        btn.inferred_consequence = "Safe dismissal (model verdict)"
+                        return (ModalRiskTier(tier_value), btn, None)
+
         # 4. Tier 2: Workflow branching decision (Halt and escalate to planner)
         for b in buttons:
             lbl = b.label.lower()
@@ -122,10 +185,16 @@ class ObstructionInterceptor:
     and escalates critical/branching choices to the orchestrator.
     """
 
-    def __init__(self, hal: IDesktopHAL, atspi_inspector: Optional[ATSPIInspector] = None) -> None:
+    def __init__(
+        self,
+        hal: IDesktopHAL,
+        atspi_inspector: Optional[ATSPIInspector] = None,
+        modal_classifier: Optional[ModalClassifier] = None,
+        min_confidence: float = 0.8,
+    ) -> None:
         self.hal = hal
         self.atspi = atspi_inspector or ATSPIInspector()
-        self.router = SemanticModalRouter()
+        self.router = SemanticModalRouter(classifier=modal_classifier, min_confidence=min_confidence)
         self.pending_escalation: Optional[ModalEscalationPayload] = None
         self.pending_buttons: Dict[str, ModalButtonOption] = {}
 
@@ -232,6 +301,7 @@ class ObstructionInterceptor:
                 window_title=title,
                 body_text=body,
                 risk_tier=tier,
+                classified_by=self.router.last_source,
                 auto_dismissed=True,
                 action_taken=f"Auto-dismissed benign dialog via '{safe_btn.label}' at ({cx}, {cy})",
             )
@@ -248,6 +318,7 @@ class ObstructionInterceptor:
                 window_title=title,
                 body_text=body,
                 risk_tier=tier,
+                classified_by=self.router.last_source,
                 auto_dismissed=True,
                 extracted_summary=body,
                 action_taken=f"Auto-acknowledged informative notice via '{safe_btn.label}'",
@@ -266,6 +337,7 @@ class ObstructionInterceptor:
                 window_title=title,
                 body_text=body,
                 risk_tier=tier,
+                classified_by=self.router.last_source,
                 auto_dismissed=False,
                 action_taken=f"BLOCKED: Modal requires orchestrator decision [{tier.value}]",
                 escalation=escalation,

@@ -3,7 +3,7 @@
 import re
 import time
 import logging
-from typing import Optional, Dict, Tuple, List, Callable
+from typing import Any, Optional, Dict, Tuple, List, Callable
 from PIL import Image
 
 from vision_mcp.hal.base import IDesktopHAL
@@ -70,7 +70,18 @@ class FeedbackLoopController:
         self.atspi_inspector = self.grounding_engine._semantic.inspector
         self.cv_detector = self.grounding_engine._cv.detector
 
-        self.obstruction_interceptor = ObstructionInterceptor(hal, self.atspi_inspector)
+        self.neural_grounder = LocalNeuralGrounder()
+        gemma = self.neural_grounder.gemma3_grounder
+        modal_classifier = None
+        if gemma is not None and CONFIG.gemma3_modal_tiebreak:
+            def modal_classifier(text: str, labels: List[str]) -> Dict[str, Any]:
+                return gemma.classify_modal(text, button_labels=labels, timeout=CONFIG.gemma3_modal_timeout_seconds)
+        self.obstruction_interceptor = ObstructionInterceptor(
+            hal,
+            self.atspi_inspector,
+            modal_classifier=modal_classifier,
+            min_confidence=CONFIG.gemma3_modal_min_confidence,
+        )
         self.quiescence_monitor = (
             X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
             if CONFIG.enable_quiescence_monitor
@@ -80,7 +91,6 @@ class FeedbackLoopController:
         self.skill_registry = DynamicSkillRegistry()
         self.trajectory_compiler = TclTrajectoryCompiler()
         self.vdom_fusion = VDOMFusionEngine()
-        self.neural_grounder = LocalNeuralGrounder()
         self.layout_solver = SubPaneLayoutSolver()
         self.last_vdom_snapshot: Optional[VirtualDOMSnapshot] = None
         self.active_marks: Dict[int, UIElement] = {}
@@ -305,6 +315,19 @@ class FeedbackLoopController:
                         passed = True
                         msg = "CURSOR_CHANGED: monitor unavailable, skipped"
 
+                elif assertion.assertion_type == StateAssertionType.VISUAL_QUERY:
+                    region = tuple(assertion.visual_region) if assertion.visual_region else None
+                    res = self.ask_screen(assertion.visual_question or "", region=region)
+                    if res["answer"] is None:
+                        passed = False
+                        msg = f"VISUAL_QUERY unanswered ({res['evidence']}); take a screenshot to verify"
+                    else:
+                        passed = bool(res["answer"]) and res["confidence"] >= CONFIG.gemma3_visual_min_confidence
+                        msg = (
+                            f"VISUAL_QUERY '{assertion.visual_question}': answer={res['answer']} "
+                            f"confidence={res['confidence']:.2f} evidence='{res['evidence']}'"
+                        )
+
                 elif assertion.assertion_type == StateAssertionType.SUBPANE_SSIM_DROP:
                     passed = True
                     msg = f"SUBPANE_SSIM_DROP: verified for {assertion.target_subpane_id}"
@@ -318,6 +341,33 @@ class FeedbackLoopController:
 
         all_passed = all(results) if contract.require_all else any(results)
         return all_passed, details
+
+    def ask_screen(
+        self,
+        question: str,
+        region: Optional[Tuple[int, int, int, int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Answers a yes/no question about the screen with local Gemma, without
+        returning any image. ``region`` is (x, y, w, h); defaults to the active
+        window, then the full screen. ``answer`` is None when Gemma is off or fails.
+        """
+        gemma = self.neural_grounder.gemma3_grounder
+        if not question.strip():
+            return {"answer": None, "confidence": 0.0, "evidence": "empty question", "source": "fallback"}
+        if gemma is None:
+            return {"answer": None, "confidence": 0.0, "evidence": "Gemma sidecar disabled", "source": "fallback"}
+        if region is None:
+            try:
+                win = self.hal.get_active_window()
+                if win and win.bbox.width > 0 and win.bbox.height > 0:
+                    region = (win.bbox.x, win.bbox.y, win.bbox.width, win.bbox.height)
+            except Exception:
+                region = None
+        image = self.hal.capture_screen(region=region)
+        result = gemma.ask_yes_no(image, question)
+        result["region"] = list(region) if region else None
+        return result
 
     def execute_with_verification(
         self,

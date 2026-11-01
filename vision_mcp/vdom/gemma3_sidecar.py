@@ -147,6 +147,25 @@ _MODAL_SCHEMA: Dict[str, Any] = {
 }
 
 
+_YES_NO_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "boolean"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": {"type": "string"},
+    },
+    "required": ["answer", "confidence", "evidence"],
+}
+
+
+def _fit_image(image: Image.Image, max_side: int) -> Image.Image:
+    w, h = image.size
+    scale = max_side / float(max(w, h))
+    if scale >= 1.0:
+        return image
+    return image.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+
+
 def _escalate(reason: str) -> Dict[str, Any]:
     """Fail-closed modal verdict: never auto-click, hand the choice to the planner."""
     return {
@@ -311,6 +330,7 @@ class Gemma3Grounder:
         modal_text: str,
         modal_image: Optional[Image.Image] = None,
         button_labels: Optional[List[str]] = None,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Classifies a modal dialog into the same tiers as ``ModalRiskTier``.
@@ -346,7 +366,7 @@ class Gemma3Grounder:
                 user=user_prompt,
                 schema=_MODAL_SCHEMA,
                 images=images,
-                timeout=self.timeout,
+                timeout=timeout or self.timeout,
             )
         except GemmaError as e:
             logger.warning(f"Modal classification with Gemma 3 failed: {e}")
@@ -377,6 +397,53 @@ class Gemma3Grounder:
             "suggested_button": suggested,
             "confidence": confidence,
             "reason": str(data.get("reason", "")),
+            "source": "gemma",
+        }
+
+    def ask_yes_no(
+        self,
+        image: Image.Image,
+        question: str,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Answers a yes/no question about a screen crop.
+
+        Returns ``{answer, confidence, evidence, source}``. ``answer`` is None
+        when Gemma could not answer (unavailable, timeout, bad reply), so the
+        caller can fall back to sending a screenshot to the planner.
+        """
+        if image.size[0] < 4 or image.size[1] < 4:
+            return {"answer": None, "confidence": 0.0, "evidence": "crop too small", "source": "fallback"}
+        crop = _fit_image(image, CONFIG.gemma3_visual_max_side)
+        system_prompt = (
+            "You check the state of a desktop application from a screenshot crop.\n"
+            "Answer the question with true or false. Base the answer only on what is visible. "
+            "If the crop does not show enough to tell, answer false with low confidence. "
+            "evidence is one short sentence quoting the visible text or describing the element you relied on."
+        )
+        try:
+            data = self.client.chat_json(
+                model=self.vision_model,
+                system=system_prompt,
+                user=question,
+                schema=_YES_NO_SCHEMA,
+                images=[encode_image(crop, quality=90)],
+                timeout=timeout or self.timeout,
+            )
+        except GemmaError as e:
+            return {"answer": None, "confidence": 0.0, "evidence": f"Gemma unavailable: {e}", "source": "fallback"}
+        answer = data.get("answer")
+        if not isinstance(answer, bool):
+            return {"answer": None, "confidence": 0.0, "evidence": f"bad answer {answer!r}", "source": "fallback"}
+        try:
+            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return {
+            "answer": answer,
+            "confidence": confidence,
+            "evidence": str(data.get("evidence", ""))[:300],
             "source": "gemma",
         }
 

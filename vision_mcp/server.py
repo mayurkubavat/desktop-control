@@ -567,6 +567,27 @@ def _gemma_diagnostics() -> Optional[Dict[str, Any]]:
 
 
 @mcp_server.tool()
+def ask_screen(question: str, region: Optional[List[int]] = None) -> Dict[str, Any]:
+    """
+    Answers a yes/no question about the screen using the local Gemma model, without
+    sending an image back to the client (zero image tokens).
+
+    Use it to verify an action ("Did the Save dialog close?", "Is the simulation
+    status 'Running'?"). If ``answer`` is null or confidence is low, fall back to
+    take_screenshot.
+
+    Args:
+        question: A yes/no question about what is visible.
+        region: Optional [x, y, width, height]; defaults to the active window.
+
+    Returns:
+        {answer: bool|null, confidence: 0..1, evidence: str, source: 'gemma'|'fallback', region}
+    """
+    reg_tuple = tuple(region) if region and len(region) == 4 else None
+    return controller.ask_screen(question, region=reg_tuple)
+
+
+@mcp_server.tool()
 def run_terminal_command(
     command: str,
     timeout_seconds: int = CONFIG.command_timeout_seconds,

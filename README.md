@@ -87,7 +87,7 @@ Add `desktop-control` to your MCP client configuration file:
 
 ---
 
-## Available Tools (37 Tools)
+## Available Tools (38 Tools)
 
 ### Screen Perception & Window Management
 | Tool | Description |
@@ -99,6 +99,7 @@ Add `desktop-control` to your MCP client configuration file:
 | `get_active_window` | Returns information about the currently focused window. |
 | `focus_window` | Brings a window to the foreground by ID or title. |
 | `wait_for_ui_change` | Waits until a visual change occurs on screen. |
+| `ask_screen` | Answers a yes/no question about the screen with local Gemma; returns text only, no image tokens. |
 
 ### Mouse & Keyboard Input
 | Tool | Description |

@@ -130,6 +130,27 @@ class VisionConfig(BaseModel):
         default="10m",
         description="How long Ollama keeps the Gemma model loaded after a call.",
     )
+    gemma3_modal_tiebreak: bool = Field(
+        default=True,
+        description="Ask Gemma about dialogs the regex rules cannot classify. Gemma can only make the verdict "
+        "stricter, or approve a known-safe dismiss button on a dialog with no risky keywords.",
+    )
+    gemma3_modal_min_confidence: float = Field(
+        default=0.8,
+        description="Minimum Gemma confidence before a dialog may be auto-dismissed on its verdict.",
+    )
+    gemma3_modal_timeout_seconds: float = Field(
+        default=10.0,
+        description="Timeout for a Gemma dialog triage call; on timeout the dialog is escalated.",
+    )
+    gemma3_visual_min_confidence: float = Field(
+        default=0.6,
+        description="Minimum Gemma confidence for a VISUAL_QUERY post-condition to pass.",
+    )
+    gemma3_visual_max_side: int = Field(
+        default=896,
+        description="Long-side pixel cap for crops sent to Gemma (896 is Gemma 3's native image size).",
+    )
     gemma3_timeout_seconds: float = Field(
         default=25.0,
         description="Maximum timeout in seconds for local Gemma 3 inference requests.",

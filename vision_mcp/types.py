@@ -26,6 +26,7 @@ class StateAssertionType(str, Enum):
     TEXT_APPEARED = "text_appeared"
     SUBPANE_SSIM_DROP = "subpane_ssim_drop"
     CURSOR_CHANGED = "cursor_changed"
+    VISUAL_QUERY = "visual_query"
 
 
 class PostConditionAssertion(BaseModel):
@@ -37,6 +38,14 @@ class PostConditionAssertion(BaseModel):
     expected_state: Optional[str] = Field(default=None, description="Expected accessible state (e.g., FOCUSED, CHECKED)")
     min_ssim_delta: float = Field(default=0.08, ge=0.0, le=1.0, description="Minimum structural change required")
     cursor_expected: Optional[str] = Field(default=None, description="Expected cursor shape name (e.g., arrow, text)")
+    visual_question: Optional[str] = Field(
+        default=None,
+        description="VISUAL_QUERY: yes/no question answered by local Gemma on a crop (e.g. 'Is the Save dialog closed?')",
+    )
+    visual_region: Optional[List[int]] = Field(
+        default=None,
+        description="VISUAL_QUERY: [x, y, width, height] crop; defaults to the active window",
+    )
 
 
 class PostConditionContract(BaseModel):
@@ -88,6 +97,7 @@ class ModalTriageResult(BaseModel):
     window_title: str = Field(default="", description="Title of the detected window")
     body_text: str = Field(default="", description="Body text content of the dialog")
     risk_tier: Optional[ModalRiskTier] = Field(default=None, description="Assessed risk tier")
+    classified_by: Optional[str] = Field(default=None, description="'rules' or 'gemma' (local model tie-breaker)")
     auto_dismissed: bool = Field(default=False, description="Whether the modal was safely auto-dismissed")
     action_taken: str = Field(default="", description="Description of the action taken (or escalation reason)")
     extracted_summary: Optional[str] = Field(default=None, description="Information extracted from informative dialogs")

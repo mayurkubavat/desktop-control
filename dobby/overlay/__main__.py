@@ -4,12 +4,16 @@
 reading commands from stdin.
 """
 
+import os
 import sys
 
 if __name__ == "__main__":
-    if sys.platform != "darwin":
-        sys.stderr.write("dobby.overlay helper only runs on macOS\n")
+    if sys.platform == "darwin":
+        from .mac_helper import main
+    elif sys.platform.startswith("linux") and os.environ.get("DISPLAY"):
+        from .x11_helper import main
+    else:
+        sys.stderr.write("dobby.overlay helper needs macOS or a Linux X11 DISPLAY\n")
         sys.exit(2)
-    from .mac_helper import main
 
     sys.exit(main(sys.argv[1:]))

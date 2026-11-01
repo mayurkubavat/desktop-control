@@ -112,6 +112,10 @@ def test_occluded():
 def test_overlay_enabled_rules():
     assert not overlay_enabled({}, platform="linux")
     assert not overlay_enabled({"DOBBY_OVERLAY": "1"}, platform="linux")
+    assert overlay_enabled({"DISPLAY": ":0"}, platform="linux")
+    assert not overlay_enabled({"DISPLAY": ":0", "DOBBY_OVERLAY": "0"}, platform="linux")
+    assert not overlay_enabled({"DISPLAY": ":0", "PYTEST_CURRENT_TEST": "x"}, platform="linux")
+    assert not overlay_enabled({"WAYLAND_DISPLAY": "wayland-0"}, platform="linux")
     assert overlay_enabled({}, platform="darwin")
     assert not overlay_enabled({"DOBBY_OVERLAY": "0"}, platform="darwin")
     assert not overlay_enabled({"PYTEST_CURRENT_TEST": "x"}, platform="darwin")

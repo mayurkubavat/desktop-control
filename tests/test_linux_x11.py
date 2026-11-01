@@ -301,3 +301,88 @@ def test_screen_state_loop_end_to_end(hal, spawn):
     assert r["ok"], r
     out, _ = proc.communicate(timeout=5)
     assert out.strip() == "Dobby"
+
+
+# ---------------------------------------------------------------- overlay
+
+VIOLET = (124, 92, 255)  # #7C5CFF, the default overlay color
+
+
+def _near(px, rgb, tol=12):
+    return all(abs(a - b) <= tol for a, b in zip(px[:3], rgb))
+
+
+@pytest.fixture
+def overlay(hal):
+    try:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk  # noqa: F401
+    except Exception:
+        pytest.skip("GTK 3 (python3-gi, gir1.2-gtk-3.0) not installed")
+    from dobby.overlay.client import OverlayClient
+
+    client = OverlayClient(config={"speed": 0}, log_path=None)
+    yield client
+    client.close()
+
+
+def test_overlay_pointer_glow_and_capture_hiding(hal, overlay, spawn):
+    win, _ = spawn()
+    assert overlay.move(400, 300, verb="Click")
+    assert overlay.track(window_id=win.window_id)
+    time.sleep(0.6)  # glow follows on the next track tick
+    shot = hal.capture_screen()
+    b = win.bbox
+    assert _near(shot.getpixel((404, 308)), VIOLET), "pointer not drawn"
+    assert _near(shot.getpixel((b.x + b.width // 2, b.y - 2)), VIOLET), "glow not drawn"
+
+    assert overlay.hide()
+    hidden = hal.capture_screen()
+    assert not _near(hidden.getpixel((404, 308)), VIOLET)
+    assert not _near(hidden.getpixel((b.x + b.width // 2, b.y - 2)), VIOLET)
+    assert overlay.show()
+
+
+def test_overlay_hal_capture_never_shows_overlay(hal, overlay):
+    from dobby.overlay import OverlayHAL
+
+    wrapped = OverlayHAL(hal, overlay)
+    wrapped.mouse_move(500, 400)  # the agent pointer glides here first
+    time.sleep(0.2)
+    shot = wrapped.capture_screen()
+    assert not _near(shot.getpixel((504, 408)), VIOLET)
+    time.sleep(0.2)  # overlay maps back after the capture
+    raw = hal.capture_screen()
+    assert _near(raw.getpixel((504, 408)), VIOLET)
+
+
+def test_overlay_panels_are_not_listed_as_windows(hal, overlay):
+    from dobby.overlay.protocol import OVERLAY_WINDOW_TITLE
+
+    assert overlay.move(300, 300)
+    time.sleep(0.2)
+    assert all(not w.title.startswith(OVERLAY_WINDOW_TITLE) for w in hal.list_windows())
+
+
+def test_overlay_confirm_allow_deny_and_timeout(hal, overlay):
+    import threading
+
+    from dobby.perception.atspi import ATSPIInspector
+
+    insp = ATSPIInspector(hal=hal)
+    if not insp.is_available:
+        pytest.skip("AT-SPI unavailable")
+    assert overlay.confirm("Delete the file", secs=0.5) is False  # timeout = deny
+
+    for button, expected in (("Allow", True), ("Deny", False)):
+        result = {}
+        t = threading.Thread(target=lambda: result.update(ok=overlay.confirm("Run synthesis", secs=10)))
+        t.start()
+        btn = _wait_for(lambda: next((e for e in insp.inspect_desktop(app_name_filter="Dobby Overlay")
+                                      if e.name == button), None))
+        assert btn is not None, f"{button} button not found"
+        hal.mouse_click(btn.bbox.x + btn.bbox.width // 2, btn.bbox.y + btn.bbox.height // 2)
+        t.join(timeout=5)
+        assert result.get("ok") is expected

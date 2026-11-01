@@ -1,11 +1,12 @@
-"""Agent cursor and window glow overlay for Dobby (macOS).
+"""Agent cursor and window glow overlay for Dobby (macOS and Linux X11).
 
 Usage from the server or HAL factory::
 
     from dobby.overlay import wrap_hal
     hal = wrap_hal(hal)          # no-op unless the overlay is enabled
 
-Enable/disable with ``DOBBY_OVERLAY=1|0``. Default: on for macOS, off under
+Enable/disable with ``DOBBY_OVERLAY=1|0``. Default: on for macOS and for
+Linux with an X11 DISPLAY (helper: ``x11_helper.py``, GTK 3); off under
 pytest, in cassette replay (``DOBBY_REPLAY=1``) and on other platforms.
 Look settings come from ``DOBBY_OVERLAY_COLOR`` (hex), ``DOBBY_OVERLAY_SPEED``
 (1.0 normal, 0 = no animation) and ``DOBBY_OVERLAY_LABEL``.
@@ -59,7 +60,7 @@ def overlay_enabled(env: Optional[Dict[str, str]] = None, platform: str = sys.pl
     flag = env.get("DOBBY_OVERLAY", "").strip().lower()
     if flag in _FALSE:
         return False
-    if platform != "darwin":
+    if platform != "darwin" and not (platform.startswith("linux") and env.get("DISPLAY")):
         return False
     if flag in _TRUE:
         return True

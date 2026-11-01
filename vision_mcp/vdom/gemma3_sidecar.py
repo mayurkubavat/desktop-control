@@ -156,6 +156,14 @@ def _list_prompts():
     return list_prompts()
 
 
+def _is_blank(image: Image.Image, max_stddev: float = 3.0) -> bool:
+    """True for a near-uniform crop (blank, solid fill): there is nothing for Gemma to read."""
+    from PIL import ImageStat
+
+    small = image.convert("L").resize((64, 64))
+    return ImageStat.Stat(small).stddev[0] < max_stddev
+
+
 def _fit_image(image: Image.Image, max_side: int) -> Image.Image:
     w, h = image.size
     scale = max_side / float(max(w, h))
@@ -425,6 +433,9 @@ class Gemma3Grounder:
         base = {"prompt": spec.tag, "evidence_type": "none", "evidence_verified": None}
         if image.size[0] < 4 or image.size[1] < 4:
             return {**base, "answer": None, "confidence": 0.0, "evidence": "crop too small", "source": "fallback"}
+        if _is_blank(image):
+            # Nothing on screen to judge: gemma3:4b answers a confident "no" here (eval_prompts blank.png).
+            return {**base, "answer": None, "confidence": 0.0, "evidence": "blank crop", "source": "blank_crop"}
         crop = _fit_image(image, CONFIG.gemma3_visual_max_side)
         try:
             data = self.client.chat_json(

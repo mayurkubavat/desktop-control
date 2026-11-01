@@ -57,14 +57,15 @@ YES_NO_SCHEMA: Dict[str, Any] = {
 
 YES_NO = PromptSpec(
     id="yes_no",
-    version=3,
+    version=4,
     system=(
         "You check the state of a desktop application from a screenshot crop.\n"
         "Answer the question with yes, no, or unsure, based only on what is visible.\n"
         "- If the thing asked about is visible, answer yes or no. If it is visible but differs from "
         "the question (another color, another state, a dialog still open), the answer is no.\n"
-        "- Use unsure only when the crop is cut off, blurred, or does not show the thing asked about. "
-        "A wrong yes or no is worse than unsure.\n"
+        "- Use unsure when the crop is blank, cut off, blurred, or does not show the thing asked about. "
+        "Do not infer success or failure from an empty screen. A wrong yes or no is worse than unsure.\n"
+        "- Describe only what you can see. Never claim an element is visible unless it is in the crop.\n"
         "- evidence_type is text when your answer rests on words visible in the crop; then evidence "
         "is those words copied exactly, nothing else.\n"
         "- evidence_type is visual when it rests on a color, icon, shape or layout; then evidence "

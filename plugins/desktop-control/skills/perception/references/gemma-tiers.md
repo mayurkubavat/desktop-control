@@ -22,15 +22,15 @@ Measured on Mayur's MacBook Pro (16 GB), 2026-11-01, Claude window 1512x949.
 
 ## Prompt pack
 
-Every Gemma prompt lives in `vision_mcp/gemma/prompts.py` with an id and version (`yes_no@3`, `modal_triage@1`, `mark_label@1`, `mark_find@1`, `ground_roi@1`, `compress_history@1`). `get_vision_diagnostics` lists the active tags.
+Every Gemma prompt lives in `vision_mcp/gemma/prompts.py` with an id and version (`yes_no@4`, `modal_triage@1`, `mark_label@1`, `mark_find@1`, `ground_roi@1`, `compress_history@1`). `get_vision_diagnostics` lists the active tags.
 
-`yes_no@3` rules, and how to read its answer (v3 tells Gemma that a visible but different state is a no, after v2 answered unsure on a red indicator):
+`yes_no@4` rules, and how to read its answer (v3 made a visible but different state a no, after v2 answered unsure on a red indicator; v4 makes blank crops unsure after v3 invented a dialog on a blank screen, and a near-uniform crop now returns `source: blank_crop` without calling Gemma):
 - `answer` is `true`, `false`, or `null`. `null` with `source: gemma` means Gemma said unsure: take a screenshot, do not retry the same question.
 - `evidence_type: text` means the evidence is visible words. They are checked against local OCR of the same crop; `evidence_verified: false` means OCR could not find them, and confidence is capped at 0.5 (below every pass bar). Treat that as unsure.
 - `evidence_type: visual` (a color, icon, layout) is not checked; give it less weight than verified text.
 - `prompt` names the version that answered, so a regression can be traced to a prompt change.
 
-To try a different wording without editing code, put `<prompt_id>.txt` (system text only) in `~/.desktop-control/prompts/`; results then report `yes_no@3+local`. Measure it first with `scripts/eval_prompts.py` (see the `eval` skill).
+To try a different wording without editing code, put `<prompt_id>.txt` (system text only) in `~/.desktop-control/prompts/`; results then report `yes_no@4+local`. Measure it first with `scripts/eval_prompts.py` (see the `eval` skill).
 
 ## Settings (`vision_mcp/config.py`, or `configure_vision(setting, value)` at runtime)
 

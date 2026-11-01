@@ -113,7 +113,9 @@ def test_no_classifier_keeps_old_behaviour():
 
 def _controller_with_fake(fake: FakeOllama) -> FeedbackLoopController:
     hal = MagicMock()
-    hal.capture_screen.return_value = Image.new("RGB", (1600, 1000), "white")
+    screen = Image.new("RGB", (1600, 1000), "white")
+    screen.paste((40, 40, 40), (100, 100, 700, 300))  # some content, so the crop is not blank
+    hal.capture_screen.return_value = screen
     hal.get_active_window.return_value = WindowInfo(
         window_id="1", title="Vivado", bbox=BoundingBox(x=100, y=50, width=1600, height=1000)
     )

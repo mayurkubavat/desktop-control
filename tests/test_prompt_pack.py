@@ -15,7 +15,18 @@ from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
 
 from test_gemma3_sidecar import FakeOllama
 
+from PIL import ImageDraw
+
 IMG = Image.new("RGB", (200, 100), (240, 240, 240))
+ImageDraw.Draw(IMG).rectangle([20, 20, 120, 60], fill=(30, 30, 30))  # not blank
+
+
+def test_blank_crop_is_unsure_without_calling_gemma():
+    fake = FakeOllama()  # no replies: a Gemma call would fail
+    g = Gemma3Grounder(client=GemmaClient(transport=fake))
+    res = g.ask_yes_no(Image.new("RGB", (400, 200), (128, 128, 128)), "Did the save succeed?")
+    assert res["answer"] is None and res["source"] == "blank_crop"
+    assert fake.chat_calls == []
 
 
 def _ask(reply, ocr=None):
@@ -26,14 +37,14 @@ def _ask(reply, ocr=None):
 
 def test_registry_has_every_gemma_call():
     assert set(PROMPTS) == {"yes_no", "modal_triage", "mark_label", "mark_find", "ground_roi", "compress_history"}
-    assert get_prompt("yes_no", prompt_dir="").tag == "yes_no@3"
+    assert get_prompt("yes_no", prompt_dir="").tag == "yes_no@4"
     assert all(p["system"] for p in list_prompts())
 
 
 def test_local_override(tmp_path):
     (tmp_path / "yes_no.txt").write_text("Custom checker prompt.")
     spec = get_prompt("yes_no", prompt_dir=str(tmp_path))
-    assert spec.system == "Custom checker prompt." and spec.tag == "yes_no@3+local"
+    assert spec.system == "Custom checker prompt." and spec.tag == "yes_no@4+local"
     assert spec.schema == PROMPTS["yes_no"].schema
 
 
@@ -61,7 +72,7 @@ def test_user_message_includes_ocr_and_truncates():
 def test_unsure_is_none_not_a_guess():
     res, _ = _ask({"answer": "unsure", "confidence": 0.7, "evidence_type": "none", "evidence": ""})
     assert res["answer"] is None and res["confidence"] == 0.0 and res["source"] == "gemma"
-    assert res["prompt"] == "yes_no@3"
+    assert res["prompt"] == "yes_no@4"
 
 
 def test_text_evidence_confirmed_by_ocr_keeps_confidence():

@@ -39,3 +39,4 @@ Provide production-ready Python code snippets, Pydantic schemas, and state machi
 1. A modular `ToolSetManager` or `PluginDispatcher` for deferred / namespaced tool loading in MCP.
 2. A local `BicameralStepController` that routes verification and grounding to local Gemma 3 / OCR before falling back to cloud VLM calls.
 3. An automated end-to-end integration test harness mocking multi-turn desktop trajectories with simulated visual deltas and local SLM assertions.
+

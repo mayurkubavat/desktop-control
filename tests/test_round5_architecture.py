@@ -329,3 +329,40 @@ def test_compact_trajectory_history_8_part_invariant():
     # Most recent raw turns are preserved verbatim
     assert compacted[-2] == messages[-2]
     assert compacted[-1] == messages[-1]
+
+
+def test_cursor_state_checkpoint_schema_validation():
+    """Verify StateCheckpoint Pydantic model validates structured fields."""
+    from vision_mcp.agent_loop.bicameral import StateCheckpoint, EscalationPredicate
+
+    checkpoint = StateCheckpoint(
+        user_instructions="Synthesize Vivado top-level module",
+        task_template=["[x] Open Project", "[/] Run Synthesis", "[ ] Check Timing"],
+        constraints=["Do not close project", "Timeout 300s"],
+        actions_taken=["T1: Launched project", "T2: Clicked Run Synthesis"],
+        errors_and_fixes=["None"],
+        progress_metrics="1/3 steps completed",
+        current_screen_state="Window: Vivado 2025.1, Active Pane: Design Runs",
+        next_immediate_step="Wait for synthesis run1 to finish",
+        compressor="gemma3",
+        covers_turns=(1, 4),
+    )
+
+    assert checkpoint.user_instructions == "Synthesize Vivado top-level module"
+    assert len(checkpoint.task_template) == 3
+    assert checkpoint.covers_turns == (1, 4)
+    assert EscalationPredicate.P1_LOW_CONFIDENCE.value == "p1_confidence_below_threshold"
+    assert EscalationPredicate.P2_UNEXPECTED_MODAL.value == "p2_unexpected_or_destructive_modal"
+
+
+def test_hal_factory_desktop_hal_replay_override(monkeypatch):
+    """Verify DESKTOP_HAL=replay environment override instantiates MockReplayHAL."""
+    from vision_mcp.hal import factory
+    from vision_mcp.hal.mock_replay import MockReplayHAL
+
+    monkeypatch.setenv("DESKTOP_HAL", "replay")
+    factory._HAL_INSTANCE = None  # Reset singleton
+
+    hal = factory.get_desktop_hal()
+    assert isinstance(hal, MockReplayHAL)
+    factory._HAL_INSTANCE = None  # Clean up

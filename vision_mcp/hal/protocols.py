@@ -7,8 +7,11 @@ reasoning and agent loop.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
-from PIL import Image
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+
+if TYPE_CHECKING:
+    from PIL import Image
+
 from vision_mcp.types import WindowInfo
 
 
@@ -20,7 +23,7 @@ class IScreenCapture(Protocol):
         """Returns primary screen resolution as (width, height) in physical pixels."""
         ...
 
-    def capture_screen(self, region: Optional[Tuple[int, int, int, int]] = None) -> Image.Image:
+    def capture_screen(self, region: Optional[Tuple[int, int, int, int]] = None) -> Any:
         """Captures display or sub-region as a PIL RGB Image."""
         ...
 
@@ -99,3 +102,4 @@ class IAXTreeDriver(Protocol):
 class IDesktopHALProtocol(IScreenCapture, IInputDriver, IWindowManager, Protocol):
     """Composite protocol representing the full Desktop Hardware Abstraction Layer."""
     ...
+

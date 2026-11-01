@@ -285,6 +285,11 @@ class X11QuiescenceMonitor:
                     return (ExecutionPhase.CONTRACT_FAILED, elapsed_ms, total_damage)
 
             elif phase == ExecutionPhase.SETTLING:
+                if elapsed_ms >= max_total_timeout_ms:
+                    if cursor_busy:
+                        return (ExecutionPhase.ASYNC_PROMOTED, elapsed_ms, total_damage)
+                    return (ExecutionPhase.CONTRACT_FAILED, elapsed_ms, total_damage)
+
                 if damaged_px > 0 or cursor_busy:
                     # Damage spiked back up or cursor became busy again
                     phase = ExecutionPhase.DAMAGE_ACCUMULATION

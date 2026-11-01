@@ -473,3 +473,4 @@ class MockReplayHAL:
 5. **Phase 5: Declarative Application Plugins & Self-Healing Anchors**
    - Migrate Vivado/Verdi plugins to versioned YAML specs (`plugins/vivado_2024_2.yaml`).
    - Implement Canny edge / gradient magnitude template matching for theme-agnostic icon resolution.
+

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -25,16 +25,44 @@ class VerificationTier(str, Enum):
     TIER2_CLOUD_VLM = "tier2_cloud_planner"
 
 
+class EscalationPredicate(str, Enum):
+    """The 7 observable predicates triggering escalation to Cloud System 2."""
+
+    P1_LOW_CONFIDENCE = "p1_confidence_below_threshold"
+    P2_UNEXPECTED_MODAL = "p2_unexpected_or_destructive_modal"
+    P3_VISUAL_STALL = "p3_visual_damage_stall"
+    P4_STRUCTURAL_STALL = "p4_accessibility_tree_stall"
+    P5_EXECUTION_HANG = "p5_timeout_or_busy_cursor_hang"
+    P6_GROUNDING_MISS = "p6_all_local_grounding_tiers_missed"
+    P7_CONTRACT_FAILURE = "p7_post_condition_contract_breach"
+
+
 class StepExecutionVerdict(BaseModel):
     """Result of bicamerally guarded step execution."""
 
     success: bool
     tier_used: VerificationTier
     escalated_to_cloud: bool = False
+    escalation_reason: Optional[EscalationPredicate] = None
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
     tokens_consumed: int = 0
     action_result: Optional[Dict[str, Any]] = None
+
+
+class StateCheckpoint(BaseModel):
+    """Pydantic-validated 8-part invariant trajectory checkpoint."""
+
+    user_instructions: str = Field(default="", description="Verbatim goal and success criteria")
+    task_template: List[str] = Field(default_factory=list, description="Checklist with [x], [/], [ ]")
+    constraints: List[str] = Field(default_factory=list, description="Hard guardrails")
+    actions_taken: List[str] = Field(default_factory=list, description="Chronological summary of turns")
+    errors_and_fixes: List[str] = Field(default_factory=list, description="Errors and verified workarounds")
+    progress_metrics: str = Field(default="", description="Quantitative completion state")
+    current_screen_state: str = Field(default="", description="Active window, pane, modal, cursor")
+    next_immediate_step: str = Field(default="", description="Preconditions and recommended next primitive")
+    compressor: str = Field(default="gemma3", description="Model or heuristic used")
+    covers_turns: Tuple[int, int] = Field(default=(0, 0), description="Range of turn indices compacted")
 
 
 COMPACT_PROMPT_TEMPLATE = """You are a deterministic Desktop Trajectory State Compressor.
@@ -304,3 +332,4 @@ class BicameralStepController:
         result.append(compacted_msg)
         result.extend(recent_turns)
         return result
+

@@ -1,0 +1,32 @@
+You are a world-class Systems Architect and AI Agent Researcher specializing in autonomous Computer-Use Agents, Model Context Protocol (MCP) server design, and high-efficiency multimodal orchestration.
+
+We are designing and scaling a production-grade "desktop-control" MCP server (used across macOS, Linux, and Windows) that enables frontier AI models (Claude 3.7 / Sonnet, Gemini 2.5 / 4 Argon, GPT-4.5) to reliably automate desktop GUIs and dense engineering applications (IDEs, EDA tools like Synopsys Verdi and AMD Vivado, terminal workflows, and native OS apps).
+
+Please provide an in-depth, rigorous architectural and implementation analysis covering the following five core pillars:
+
+### 1. Codebase Maintainability & Platform Abstraction (HAL)
+- What is the gold-standard architecture for isolating platform-specific APIs (macOS Quartz/CGEvent/ScreenCaptureKit, Linux X11/Wayland/AT-SPI2, Windows UIA/SendInput) behind a clean microkernel HAL without importing OS-specific libraries in test/CI?
+- How should coordinate systems, Retina/HiDPI scaling, multi-monitor topologies, and window-relative transformations be normalized across operating systems?
+- How can we implement deterministic headless CI test harnesses (e.g. cassette record/replay of state frames) so agents and tools can be tested without physical displays or Xvfb/WindowServer?
+
+### 2. MCP Catalog Modularization & Token Efficiency
+- Loading 40+ tool schemas upfront consumes 5,000+ tokens before the agent takes its first turn. What are the best patterns for dynamic capability gating, domain-specific profiles (e.g., minimal_computer_use, window_mgmt, full_developer, eda_automation), and notifying clients via `notifications/tools/list_changed`?
+- How should heavy perception payloads (accessibility trees, VDOMs, dense OCR line arrays) be offloaded out-of-band (e.g. RAM-backed tmpfs files or `mcp://` resource URIs) to return compact 80-token summaries while retaining deep inspection on demand?
+
+### 3. Slashing Cloud AI Token Costs via Local Models & Hybrid Edge Execution
+- How can on-device models (e.g. Apple Silicon ANE/Metal, quantized Gemma 3 4B-IT, CoreML OmniParser v2, Apple Vision OCR / RapidOCR) act as an asymmetric "System 1" shield to reduce cloud VLM token spend by 85–90%?
+- What are the concrete design patterns for Bicameral System 1 (local fast execution/verification) vs System 2 (cloud planning/reasoning) routing? What are the exact escalation predicates (confidence thresholds, stall detection, modal triage)?
+- How should long-horizon trajectories (30–60 turns) be compacted locally? Detail the schema and prompts for local state distillation (e.g. 8-part invariant compression checkpoints) to prevent multi-turn quadratic token explosion.
+
+### 4. Robust Grounding, Perception, and Theme-Agnostic Self-Healing
+- How can we achieve <30ms sub-pixel grounding on custom canvas widgets and unlabelled icon buttons where OS accessibility trees are empty?
+- What techniques work best for theme-agnostic visual matching (dark mode vs light mode, UI re-skins) using Canny gradient maps, local binary patterns, or relational OCR anchors?
+- How should event-driven quiescence (damage rectangles, cursor state) replace brittle sleep intervals?
+
+### 5. Advanced Next-Gen Frontiers & Breakthrough Ideas
+- What breakthrough implementation ideas from recent agent research (e.g., Anthropic Computer Use, Cursor background agents, Stagehand, OSWorld benchmarks) should we adopt?
+- How can skill crystallization (recording manual user interactions and compiling them into parameterizable deterministic Python/AST macros) be implemented cleanly?
+- What are other high-leverage architectural patterns you recommend for making Desktop Control MCP the most reliable, token-efficient, and maintainable computer-use server in existence?
+
+Provide concrete architecture diagrams, type contracts, schemas, and actionable code blueprints.
+

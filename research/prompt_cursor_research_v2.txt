@@ -1,0 +1,32 @@
+You are a Principal Software Architect specializing in Model Context Protocol (MCP) server architecture, cross-platform systems engineering, and multimodal AI orchestration.
+
+We are designing a high-performance, modular "desktop-control" MCP server operating across macOS, Linux, and Windows. It provides programmatic tools for AI models to interact with complex desktop applications (including developer IDEs, dense Qt/Swing enterprise software, and system utilities).
+
+Please provide an in-depth, rigorous architectural and implementation analysis covering these five core design areas:
+
+### 1. Modular Platform Abstraction (Microkernel HAL) & Headless Testing
+- How should platform-specific drivers (macOS Quartz/CGEvent/ScreenCaptureKit, Linux X11/Wayland/AT-SPI2, Windows UIA/SendInput) be decoupled behind zero-dependency Protocol interfaces so Linux CI runners never fail on macOS/Windows imports?
+- What is the best coordinate normalization strategy across Retina/HiDPI displays, fractional scaling, and multi-monitor layouts?
+- How should a deterministic cassette replay harness (recorded state frames: OCR boxes, AX tree diffs, pixel deltas) be structured for display-free CI testing?
+
+### 2. MCP Tool Catalog Modularization & Token Economics
+- When a server defines 40+ tools, loading full JSON schemas consumes 5,000+ tokens upfront. What are the best patterns for dynamic capability gating (domain profiles like minimal_core, window_mgmt, developer, eda_automation) that mutate the catalog and emit `notifications/tools/list_changed`?
+- How should heavy payloads (large accessibility trees, VDOMs, dense OCR line lists) be offloaded out-of-band (e.g. RAM-backed tmpfs files or `mcp://` resource URIs) to return compact 80-token summary headers while supporting deep drill-down on demand?
+
+### 3. Local Model Offloading & Bicameral System 1 / System 2 Routing
+- How can on-device models (e.g. quantized Gemma 3 4B-IT on GPU, Apple Vision OCR / CoreML on Apple Neural Engine) serve as an asymmetric "System 1" perception and verification shield to reduce cloud VLM token costs by 85–92%?
+- Detail the exact state machine and escalation predicates (confidence threshold < 0.82, unexpected modal dialogs, visual/AX stall detection) for escalating to a Cloud System 2 planner.
+- How should long multi-turn trajectories (30–60 turns) be compacted locally? Provide an invariant structured compression schema (e.g. 8-part state checkpoint) to eliminate quadratic context explosion.
+
+### 4. Resilient Perception Grounding & Theme-Agnostic Matching
+- What algorithms work best for sub-30ms coordinate grounding on unlabelled custom widgets where accessibility trees provide no names?
+- How can theme-agnostic icon matching (dark mode vs light mode) be achieved deterministically using normalized gradient magnitude (Canny edge maps) or relational OCR anchoring?
+- How should event-driven quiescence monitoring replace static sleep intervals?
+
+### 5. Next-Gen Frontiers & Breakthrough Patterns
+- What high-leverage architectural patterns from modern agent frameworks should be adopted?
+- How can skill crystallization (recording interactive execution traces and compiling them into parameterizable deterministic Python macros) be implemented cleanly?
+- What are other high-leverage architectural recommendations to ensure this MCP server achieves industry-leading reliability, speed, and token efficiency?
+
+Please provide concrete architectural diagrams, type contracts, schemas, and actionable code blueprints for each area.
+

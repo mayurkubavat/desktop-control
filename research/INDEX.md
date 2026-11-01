@@ -66,6 +66,12 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
   * Out-of-band file offloading (`--output-mode file` / `mcp://desktop-control/state/<file>`) for dense AX trees and VDOM.
   * Asymmetric Local Perception Shield & Hardware Partitioning (Apple Neural Engine OCR/CoreML + quantized Gemma 3 4B-IT).
   * 8-part invariant `COMPACT_PROMPT` history compaction and Bicameral System 1/System 2 execution routing.
+* [[cursor_architecture_and_token_efficiency|Cursor Architecture Specification: Platform HAL, Tool Modularization, Token Economics, and Next-Gen Agents]]
+  * In-depth codebase exploration and architectural blueprint formulated natively inside Cursor IDE.
+  * Multi-monitor logical coordinate topology, pure protocol seams, and headless cassette transition format.
+  * Complete 7-predicate escalation suite (P1–P7) and end-to-end token budget cutting cloud consumption by 89.5%–92.5%.
+  * Polarity-invariant gradient magnitude icon matching across dark/light themes and dual-path skill crystallization.
+  * Systematic implementation roadmap bridging the gap between library contracts and live execution loops.
 * [[../learnings/vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
   * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
   * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).

@@ -59,6 +59,45 @@ def menu_entries(status: str, steps: Iterable[str], halted: bool, turbo: bool, o
     return out
 
 
+# ---------------------------------------------------------- Dobby picker
+# (title, pid, [(item title, action selector)])
+PickerGroup = Tuple[str, int, List[Tuple[str, str]]]
+
+
+def picker_groups(agents: Iterable[dict], own_pid: int, own_paused: bool = False) -> List[PickerGroup]:
+    """One submenu per running Dobby, when more than one runs.
+
+    ``agents`` come from ``dobby.control.commands.overview``. Each submenu
+    pauses or resumes, or stops, just that Dobby. The last group pauses or
+    resumes all of them (pid 0).
+    """
+    agents = list(agents)
+    if len(agents) < 2:
+        return []
+    groups: List[PickerGroup] = []
+    any_running = False
+    for a in agents:
+        pid = int(a.get("pid", 0))
+        paused = bool(a.get("paused")) or (pid == own_pid and own_paused)
+        any_running = any_running or not paused
+        notes = []
+        if pid == own_pid:
+            notes.append("this bar")
+        if paused:
+            notes.append("paused")
+        elif a.get("holding"):
+            notes.append("in control")
+        elif a.get("waiting"):
+            notes.append("waiting")
+        title = _short(str(a.get("name") or f"Dobby-{pid}"), 28)
+        if notes:
+            title += "  · " + ", ".join(notes)
+        groups.append((title, pid, [("Resume" if paused else "Pause", "menuAgentPauseToggle:"),
+                                    ("Stop", "menuAgentStop:")]))
+    groups.append(("All Dobbys", 0, [("Pause all", "menuAllPause:"), ("Resume all", "menuAllResume:")]))
+    return groups
+
+
 # ------------------------------------------------------------ control bar
 # (mode, text, primary button, secondary button, colour key, dot alpha)
 BarView = Tuple[str, str, str, str, str, float]

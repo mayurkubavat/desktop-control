@@ -127,7 +127,7 @@ from . import geometry, protocol
 _kCGEventSourceUserData = 42
 DOBBY_EVENT_TAG = 0x444F4242  # same value as dobby.hal.macos.DOBBY_EVENT_TAG
 from .barlock import BAR_LOCK, BarOwner as _BarOwner
-from .menu import bar_click, bar_view, label_click, menu_entries, status_of
+from .menu import bar_click, bar_view, label_click, menu_entries, picker_groups, status_of
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "color": "#7C5CFF",  # Dobby violet; deliberately not Claude's orange
@@ -336,6 +336,18 @@ class _Target(NSObject):
 
     def menuToggleTurbo_(self, _sender):
         self.owner.toggle_turbo()
+
+    def menuAgentPauseToggle_(self, sender):
+        self.owner.agent_pause_toggle(int(sender.representedObject()))
+
+    def menuAgentStop_(self, sender):
+        self.owner.agent_stop(int(sender.representedObject()))
+
+    def menuAllPause_(self, _sender):
+        self.owner.all_paused(True)
+
+    def menuAllResume_(self, _sender):
+        self.owner.all_paused(False)
 
 
 class _HotspotView(NSView):
@@ -1616,7 +1628,69 @@ class OverlayController:
                 menu.addItem_(NSMenuItem.separatorItem())
             else:
                 self._menu_item(menu, title, action, state)
+        self._add_picker(menu)
         return menu
+
+    # ------------------------------------------------------- Dobby picker
+    def _agents(self) -> list:
+        try:
+            from dobby.control import commands, control_root
+
+            return commands.overview(control_root())
+        except Exception as exc:  # noqa: BLE001 - the menu works without it
+            sys.stderr.write(f"dobby.overlay: picker: {exc}\n")
+            return []
+
+    def _add_picker(self, menu) -> None:
+        """Insert one submenu per running Dobby after the status line."""
+        groups = picker_groups(self._agents(), self.server_pid, self.paused or self.takeover)
+        if not groups:
+            return
+        at = 2  # after "Dobby: <status>" and its separator
+        header = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Dobbys", None, "")
+        header.setEnabled_(False)
+        menu.insertItem_atIndex_(header, at)
+        for title, pid, items in groups:
+            at += 1
+            sub = NSMenu.alloc().initWithTitle_(title)
+            sub.setAutoenablesItems_(False)
+            for item_title, action in items:
+                item = self._menu_item(sub, item_title, action)
+                item.setRepresentedObject_(pid)
+            parent = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, None, "")
+            parent.setSubmenu_(sub)
+            menu.insertItem_atIndex_(parent, at)
+        menu.insertItem_atIndex_(NSMenuItem.separatorItem(), at + 1)
+
+    def _commands(self):
+        from dobby.control import commands, control_root
+
+        return commands, control_root()
+
+    def agent_pause_toggle(self, pid: int) -> None:
+        if pid == self.server_pid:
+            self.toggle_pause()
+            return
+        commands, root = self._commands()
+        commands.set_paused(root, pid, not commands.read(root, pid)["paused"])
+
+    def agent_stop(self, pid: int) -> None:
+        if pid == self.server_pid:
+            self.request_stop()
+            return
+        commands, root = self._commands()
+        commands.request_stop(root, pid)
+
+    def all_paused(self, paused: bool) -> None:
+        commands, root = self._commands()
+        for agent in commands.overview(root):
+            if agent["pid"] == self.server_pid:
+                if paused and not (self.paused or self.takeover):
+                    self.set_paused(True)
+                elif not paused and (self.paused or self.takeover):
+                    self.resume()
+            else:
+                commands.set_paused(root, agent["pid"], paused)
 
     def _refresh_menu(self) -> None:
         if self.status_item is None:

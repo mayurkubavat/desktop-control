@@ -46,6 +46,7 @@ class ControlSettings:
     busy_timeout: float = 300.0  # a step that runs longer than this counts as hung
     waiter_ttl: float = 5.0  # a waiter that stopped polling this long ago is dropped
     poll: float = 0.1
+    pause_max: float = 600.0  # a Dobby paused from the picker gives up after this
 
 
 @dataclass

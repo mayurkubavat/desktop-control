@@ -62,6 +62,7 @@ Another AI may drive the same desktop through its own Dobby. Only one agent clic
 
 - "<name> has control of the desktop": wait or do non-desktop work, then retry. `control_status` shows who holds control and for how long.
 - "Another agent used the desktop since your last look": the step was skipped and you now hold control. Look again (AX tree or screenshot) before acting.
+- "Stopped by the person from the Dobby menu": stop the task and report; do not retry unless asked.
 - When a task is done, or before long planning, call `release_control` so the other agent can start at once.
 - For a flow that must not be interrupted (a wizard, a drag across windows), call `hold_control(seconds)` first.
 

@@ -418,3 +418,31 @@ def test_tag_menu_matches_menu_bar_menu(make):
         assert want in titles
     stop = menu.itemAtIndex_(titles.index("Stop"))
     assert stop.target() is c.target and stop.action() == "menuStop:"
+
+
+# ---------------------------------------------------------- Dobby picker
+def test_picker_lists_dobbys_and_pauses_the_other(make, tmp_path, monkeypatch):
+    import os
+
+    from dobby.control import commands
+    from dobby.control.registry import register
+
+    monkeypatch.setenv("DOBBY_CONTROL_DIR", str(tmp_path / "control"))
+    root = tmp_path / "control"
+    c, _ = make()
+    c.server_pid = os.getpid()
+    register(root, "a", "Claude", os.getpid())
+    register(root, "b", "Agy", os.getppid())
+    menu = c._build_menu("Idle")
+    titles = [menu.itemAtIndex_(i).title() for i in range(menu.numberOfItems())]
+    assert "Dobbys" in titles and "All Dobbys" in titles
+    agy = menu.itemAtIndex_(titles.index("Agy"))
+    pause = agy.submenu().itemAtIndex_(0)
+    assert pause.title() == "Pause" and pause.target() is c.target
+    c.target.menuAgentPauseToggle_(pause)
+    assert commands.read(root, os.getppid())["paused"] is True
+    own = menu.itemAtIndex_(titles.index("Claude  · this bar")).submenu().itemAtIndex_(0)
+    c.target.menuAgentPauseToggle_(own)
+    assert c.paused
+    c.target.menuAllResume_(None)
+    assert not c.paused and commands.read(root, os.getppid())["paused"] is False

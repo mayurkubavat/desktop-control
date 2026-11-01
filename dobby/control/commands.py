@@ -1,0 +1,90 @@
+"""Per-Dobby Pause, Resume and Stop sent from any control bar.
+
+Each Dobby server owns ``commands/<pid>.json``: ``{"paused": bool, "stop": n}``.
+The overlay's Dobby picker writes it; that server's :class:`Controller` reads
+it before every action, waits while paused and stops when ``stop`` grows.
+Plain files keep it cross-process and cross-platform, like the lease.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from . import registry
+from .lease import LeaseStore, file_lock
+
+
+def _path(root: Path, pid: int) -> Path:
+    return Path(root) / "commands" / f"{int(pid)}.json"
+
+
+def read(root: Path, pid: int) -> Dict[str, Any]:
+    try:
+        data = json.loads(_path(root, pid).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {"paused": bool(data.get("paused")), "stop": int(data.get("stop", 0))}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"paused": False, "stop": 0}
+
+
+def _update(root: Path, pid: int, **change: Any) -> Dict[str, Any]:
+    path = _path(root, pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(path.with_suffix(".lock")):
+        cur = read(root, pid)
+        if "stop" in change:
+            cur["stop"] += 1
+            cur["paused"] = False
+            change.pop("stop")
+        cur.update(change)
+        tmp = path.with_name(f".{pid}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(cur), encoding="utf-8")
+        os.replace(tmp, path)
+        return cur
+
+
+def set_paused(root: Path, pid: int, paused: bool) -> Dict[str, Any]:
+    return _update(root, pid, paused=bool(paused))
+
+
+def request_stop(root: Path, pid: int) -> Dict[str, Any]:
+    return _update(root, pid, stop=True)
+
+
+def clear(root: Path, pid: int) -> None:
+    for p in (_path(root, pid), _path(root, pid).with_suffix(".lock")):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+def overview(root: Path) -> List[Dict[str, Any]]:
+    """Running Dobbys for the picker: name, pid, paused, holding, waiting."""
+    root = Path(root)
+    try:
+        state = LeaseStore(root).snapshot()
+    except OSError:
+        state = {}
+    holder = (state.get("holder") or {}).get("pid")
+    waiting = {int(w.get("pid", 0)) for w in (state.get("waiters") or {}).values()}
+    out = []
+    for rec in registry.list_agents(root):
+        pid = int(rec.get("pid", 0))
+        out.append({
+            "pid": pid,
+            "name": str(rec.get("name") or f"Dobby-{pid}"),
+            "paused": read(root, pid)["paused"],
+            "holding": pid == holder,
+            "waiting": pid in waiting,
+        })
+    out.sort(key=lambda a: (a["name"].lower(), a["pid"]))
+    return out
+
+
+def find(root: Path, pid: int) -> Optional[Dict[str, Any]]:
+    return next((a for a in overview(root) if a["pid"] == pid), None)

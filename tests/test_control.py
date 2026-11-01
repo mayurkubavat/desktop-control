@@ -415,3 +415,83 @@ def test_two_processes_never_overlap(tmp_path):
     whos = [w for _, _, w in rows]
     assert all(whos[i] == whos[i + 1] for i in range(0, len(whos), 2))
     assert {"A", "B"} <= set(whos)
+
+
+# --------------------------------------------------- Dobby picker commands
+def test_pause_from_picker_waits_then_resumes(tmp_path):
+    from dobby.control import commands
+
+    c = Clock()
+    a = make(tmp_path, c, "Claude", 1)
+    seen = []
+    a.on_paused = seen.append
+    commands.set_paused(tmp_path, 1, True)
+    real_sleep = c.sleep
+
+    def sleep(s):
+        real_sleep(s)
+        if c.t > 1005:
+            commands.set_paused(tmp_path, 1, False)
+
+    a._sleep = sleep
+    act(a)
+    assert seen == [True, False]
+    assert c.t > 1005
+
+
+def test_stop_from_picker_raises_once(tmp_path):
+    from dobby.control import ControlStopped, commands
+
+    c = Clock()
+    a = make(tmp_path, c, "Claude", 1)
+    commands.request_stop(tmp_path, 1)
+    with pytest.raises(ControlStopped, match="Dobby menu"):
+        act(a)
+    act(a)  # a new task after the stop runs
+
+
+def test_paused_mid_tool_lets_other_dobby_work(tmp_path):
+    from dobby.control import commands
+
+    c = Clock()
+    a, b = make(tmp_path, c, "Claude", 1), make(tmp_path, c, "Agy", 2)
+    turns = []
+
+    def sleep(s):
+        c.t += s
+        if not turns and c.t > 1011:
+            act(b)  # Agy works while Claude is paused (Claude is idle, not busy)
+            b.release()
+            turns.append("agy")
+            commands.set_paused(tmp_path, 1, False)
+
+    a._sleep = sleep
+    with a.tool_scope():
+        act(a)
+        commands.set_paused(tmp_path, 1, True)
+        with pytest.raises(ControlChanged):
+            act(a)  # back from pause: Agy acted meanwhile, so look again
+    assert turns == ["agy"]
+
+
+def test_overview_and_picker_groups(tmp_path):
+    from dobby.control import commands
+    from dobby.control.registry import register
+    from dobby.overlay.menu import picker_groups
+
+    me, other = os.getpid(), os.getppid()
+    register(tmp_path, "a", "Claude", me)
+    assert picker_groups(commands.overview(tmp_path), me) == []  # one Dobby: no picker
+    register(tmp_path, "b", "Agy", other)
+    commands.set_paused(tmp_path, other, True)
+    c = Clock()
+    ctl = make(tmp_path, c, "Claude", me)
+    act(ctl)
+    groups = picker_groups(commands.overview(tmp_path), me)
+    titles = [g[0] for g in groups]
+    assert titles == ["Agy  · paused", "Claude  · this bar, in control", "All Dobbys"]
+    assert groups[0][1] == other and groups[0][2][0] == ("Resume", "menuAgentPauseToggle:")
+    assert groups[1][2] == [("Pause", "menuAgentPauseToggle:"), ("Stop", "menuAgentStop:")]
+    assert groups[2][1] == 0
+    commands.request_stop(tmp_path, other)
+    assert commands.read(tmp_path, other) == {"paused": False, "stop": 1}

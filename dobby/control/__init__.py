@@ -25,12 +25,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .controller import ControlBusy, ControlChanged, ControlError, Controller
+from .controller import ControlBusy, ControlChanged, ControlError, ControlStopped, Controller
 from .hal import ACTING, OBSERVING, ControlHAL, find_control_hal, unwrap_control
 from .lease import ControlSettings
 
 __all__ = [
-    "ControlBusy", "ControlChanged", "ControlError", "Controller", "ControlHAL", "ControlSettings",
+    "ControlBusy", "ControlChanged", "ControlStopped", "ControlError", "Controller", "ControlHAL", "ControlSettings",
     "ACTING", "OBSERVING", "control_enabled", "control_root", "settings_from_env",
     "get_controller", "set_controller", "adopt_client_name", "agent_name", "wrap_hal", "find_control_hal", "unwrap_control",
 ]
@@ -137,7 +137,14 @@ def _wire_overlay(hal: Any, ctl: Controller) -> None:
         except Exception:  # noqa: BLE001 - cosmetic
             pass
 
+    def on_paused(paused: bool) -> None:
+        try:
+            overlay.intent("Paused from the Dobby menu" if paused else "", ms=600000 if paused else 0)
+        except Exception:  # noqa: BLE001 - cosmetic
+            pass
+
     ctl.on_wait = on_wait
+    ctl.on_paused = on_paused
 
 
 def adopt_client_name(name: Optional[str]) -> None:

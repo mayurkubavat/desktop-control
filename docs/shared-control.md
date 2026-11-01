@@ -25,6 +25,17 @@ server. Shared control makes them take turns on the mouse and keyboard.
 - The person still outranks everyone: take-over, Pause and Stop work as before.
   Turbo never skips the lease.
 
+## Dobby picker (control bar ▾)
+
+When more than one Dobby runs, the ▾ menu on the control bar lists them under
+"Dobbys", each with its state (this bar, in control, waiting, paused). Each
+entry's submenu pauses or resumes, or stops, just that Dobby; "All Dobbys"
+pauses or resumes every one. Commands go through
+`~/.dobby/control/commands/<pid>.json`, which each Dobby checks before every
+action. A paused Dobby lets go of a turn it held between steps, so the others
+keep working, and looks again after Resume if they acted meanwhile. It gives up
+after 10 minutes paused.
+
 ## Tools
 
 `control_status`, `request_control(max_wait_s)`, `release_control`,

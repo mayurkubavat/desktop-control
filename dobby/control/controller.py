@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from . import registry
+from . import commands, registry
 from .lease import Agent, ControlSettings, LeaseStore, decide, pid_alive, prune
 
 
@@ -20,6 +20,10 @@ class ControlError(RuntimeError):
 
 class ControlBusy(ControlError):
     """Another agent kept the desktop for longer than ``max_wait``."""
+
+
+class ControlStopped(ControlError):
+    """The person stopped this Dobby from the Dobby picker."""
 
 
 class ControlChanged(ControlError):
@@ -62,6 +66,8 @@ class Controller:
         self._seen_world: Optional[int] = None
         self._name_from_env = name
         self.on_wait: Optional[Callable[[Optional[Dict[str, Any]]], None]] = None
+        self.on_paused: Optional[Callable[[bool], None]] = None
+        self._stop_seen = commands.read(self.root, pid)["stop"]
         self._registered = False
         if register:
             self._register()
@@ -94,6 +100,7 @@ class Controller:
             pass
         if self._registered:
             registry.unregister(self.root, self.agent.pid)
+            commands.clear(self.root, self.agent.pid)
             self._registered = False
 
     # --------------------------------------------------------------- lease
@@ -163,6 +170,42 @@ class Controller:
                 holder.update(busy=False, last=now)
                 state["world"] = int(state.get("world", 0)) + 1
                 self._seen_world = state["world"]
+
+    def gate(self) -> None:
+        """Honour Pause/Stop sent from a Dobby picker. Call before each action.
+
+        While paused, a lease held between this tool's steps is left not busy
+        so another Dobby can work; it is taken back after Resume.
+        """
+        cmd = commands.read(self.root, self.agent.pid)
+        if cmd["stop"] > self._stop_seen:
+            self._stop_seen = cmd["stop"]
+            raise ControlStopped("Stopped by the person from the Dobby menu. Do not retry this task "
+                                 "unless they ask again.")
+        if not cmd["paused"]:
+            return
+        holding = self._depth > 0
+        if holding:
+            self._finish_without_world()
+        if self.on_paused:
+            self.on_paused(True)
+        deadline = self._clock() + self.settings.pause_max
+        try:
+            while True:
+                self._sleep(max(self.settings.poll, 0.2))
+                cmd = commands.read(self.root, self.agent.pid)
+                if cmd["stop"] > self._stop_seen:
+                    self._stop_seen = cmd["stop"]
+                    raise ControlStopped("Stopped by the person from the Dobby menu while paused.")
+                if not cmd["paused"]:
+                    break
+                if self._clock() >= deadline:
+                    raise ControlStopped("This Dobby stayed paused too long; stopping the task.")
+        finally:
+            if self.on_paused:
+                self.on_paused(False)
+        if holding:
+            self.acquire()
 
     def begin(self) -> None:
         """Enter an action or tool scope; acquires on the outermost entry."""
@@ -263,6 +306,7 @@ class _ActionScope:
 
     def __enter__(self) -> Controller:
         ctl = self.ctl
+        ctl.gate()
         with ctl._lock:
             if ctl._tool_scopes:
                 if not ctl._tool_holding:

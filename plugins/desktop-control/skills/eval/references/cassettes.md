@@ -48,8 +48,40 @@ Only `frame_id` is required per frame; the rest default as shown. `image_path` i
 - `read_screen_text(contains=...)` on the replay HAL searches the current frame's `ocr_boxes`.
 - `wait_for_quiescence` returns the frame's recorded phase and `pixel_delta_from_prev` without sleeping.
 
+## Recording from a live session
+
+1. `manage_toolsets(action="enable", domains=["skills"])`.
+2. `start_cassette_recording(name, capture_images=false, capture_ocr=true, settle_ms=400)`. The first frame is taken now.
+3. Do the task with the normal tools (`click`, `type_text`, `press_key`, `hotkey`, `find_and_click`, ...). After each input call the session waits `settle_ms` and records a frame; the transition stores the exact HAL call (`mouse_click {x,y,button,click_count}`, `keyboard_type {text,delay_ms}`, `keyboard_press_key {key_name}`, `keyboard_hotkey {keys}`, `mouse_drag`, `mouse_scroll`, `mouse_move`, `focus_window`).
+4. `stop_cassette_recording()` writes `<cassette_dir>/<name>/index.json` (default `~/.desktop-control/cassettes`) and `frames/fNNN.jpg` when images were captured. It reports frame, transition and snapshot-error counts.
+
+Names are lower-cased to `[a-z0-9_-]`; an existing name is refused rather than overwritten. Typed text is stored verbatim: do not record password entry. OCR per frame costs a few hundred milliseconds; pass `capture_ocr=false` for long sessions and rely on AX.
+
+In Python, the same recorder is `LiveCassetteRecorder(name, out_dir, snapshot_fn)` in `vision_mcp/hal/cassette_recorder.py`, attached as `session.recorder`; `FeedbackLoopController.cassette_snapshot` is the live snapshot function.
+
+## expect.json and the replay runner
+
+An optional `expect.json` beside `index.json` states what the final frame must show:
+
+```json
+{
+  "final_frame": "f002",
+  "text_present": ["Synthesis Completed"],
+  "text_absent": ["Error"],
+  "ax_names_present": ["OK"]
+}
+```
+
+- `pytest -m replay`: replays every cassette in `tests/cassettes/` (`tests/test_cassette_replay.py`).
+- `python scripts/replay_cassette.py <folder>` or `--all <parent>`: same check from the command line, exit code 1 on failure.
+- `vision_mcp.hal.cassette_replay.replay_cassette(path)` returns `{ok, steps, total_steps, final_frame, failures}`.
+
+The runner replays each recorded transition through the HAL input API, so it proves the cassette is self-consistent and its expectations hold. The useful failures come from code that drives the replay HAL itself (a macro via `crystallize_skill(cassette_path=...)`, a trajectory, a controller change): any call that differs from the recording raises `CassetteMismatch`.
+
+`tests/cassettes/example_click/` is a small worked example.
+
 ## Tips for a useful cassette
 
 - One cassette per task, named for it: `tests/cassettes/<app>_<task>/index.json`.
-- Record the frames that matter for verification (before and after the key action), not every frame.
+- Keep live recordings short: one task, few actions. Trim frames you do not need before committing.
 - Keep OCR text exact; it is what Tier 0 checks match against.

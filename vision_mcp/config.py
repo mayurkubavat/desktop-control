@@ -294,6 +294,10 @@ class VisionConfig(BaseModel):
         default="minimal_computer_use",
         description="Default active toolset profile: 'minimal_computer_use', 'window_mgmt', 'full_developer', 'eda_automation'.",
     )
+    cassette_dir: str = Field(
+        default="~/.desktop-control/cassettes",
+        description="Where start_cassette_recording writes recorded cassettes (one folder per name).",
+    )
     state_dir: Optional[str] = Field(
         default=None,
         description="Directory for RAM-backed state payload offloading (defaults to tmpfs /tmp/dc_state).",

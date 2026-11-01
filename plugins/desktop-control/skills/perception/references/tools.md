@@ -2,7 +2,7 @@
 
 # desktop-control MCP tools
 
-42 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
+44 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
 
 ## core
 
@@ -67,6 +67,8 @@
 | --- | --- | --- |
 | `start_skill_recording` | `journal_path=None` | GUI-to-Script Crystallization: Starts recording physical GUI actions and correlations with application command journal streams (e.g. vivado.jou, novas.cmd). |
 | `stop_skill_recording` | none | Stops active skill recording and returns summary of captured action steps. |
+| `start_cassette_recording` | `name`, `capture_images=False`, `capture_ocr=True`, `settle_ms=400` | Starts recording a cassette from this live session. After every input action (click, type, key, hotkey, drag, scroll, focus) the server waits settle_ms and saves AX nodes, OCR lines, windows and cursor. stop_cassette_recording writes the cassette, which replays offline with DESKTOP_HAL=replay, `pytest -m replay`, or crystallize_skill(cassette_path=...). |
+| `stop_cassette_recording` | none | Stops the cassette recording and writes <cassette_dir>/<name>/index.json (plus frames/*.jpg when images were captured). Returns the path and counts. |
 | `crystallize_skill` | `skill_name`, `task_prompt`, `app_target='vivado_2025.1'`, `extracted_entities=None`, `verification_cmd=None`, `description=None`, `cassette_path=None` | Compiles recorded GUI trajectory into a parameterized, deterministic Tcl/CLI skill, lifting entity literals into Jinja2 parameters and saving to dynamic skill registry. |
 | `execute_crystallized_skill` | `skill_name`, `arguments=None` | Executes a crystallized parameterized skill with 0 visual tokens by compiling the template and executing deterministically via application CLI/Tcl bridge. |
 | `list_crystallized_skills` | none | Lists all registered crystallized skills available for zero-visual-token deterministic execution. |

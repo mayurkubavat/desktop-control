@@ -138,6 +138,8 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "execute_crystallized_skill": ("skills", "Executes crystallized skill with parameter substitution"),
     "list_crystallized_skills": ("skills", "Lists all crystallized skills"),
     "delete_crystallized_skill": ("skills", "Deletes crystallized skill"),
+    "start_cassette_recording": ("skills", "Records live actions and screen state as a replayable cassette"),
+    "stop_cassette_recording": ("skills", "Stops cassette recording and writes index.json"),
     # VDOM
     "capture_vdom": ("vdom", "Captures unified Virtual DOM snapshot"),
     "query_vdom": ("vdom", "Zero-token spatial and semantic query on VDOM"),
@@ -1096,6 +1098,62 @@ def stop_skill_recording() -> Dict[str, Any]:
         "steps": [s.model_dump() for s in steps],
         "message": f"Skill recording stopped. Captured {len(steps)} correlated GUI action steps.",
     }
+
+
+@mcp_server.tool()
+def start_cassette_recording(
+    name: str,
+    capture_images: bool = False,
+    capture_ocr: bool = True,
+    settle_ms: int = 400,
+) -> Dict[str, Any]:
+    """
+    Starts recording a cassette from this live session. After every input action
+    (click, type, key, hotkey, drag, scroll, focus) the server waits settle_ms and
+    saves AX nodes, OCR lines, windows and cursor. stop_cassette_recording writes
+    the cassette, which replays offline with DESKTOP_HAL=replay, `pytest -m replay`,
+    or crystallize_skill(cassette_path=...).
+
+    Typed text is stored verbatim, so do not record while typing secrets.
+
+    Args:
+        name: Cassette name; becomes the folder name ([a-z0-9_-]).
+        capture_images: Also save a JPEG of the screen per frame (larger, but replays visual tools).
+        capture_ocr: Run local OCR per frame (default true; turn off for speed).
+        settle_ms: Wait after each action before the snapshot.
+    """
+    from vision_mcp.hal.cassette_recorder import LiveCassetteRecorder
+
+    current = getattr(hal, "recorder", None)
+    if current is not None and current.active:
+        return {"success": False, "message": f"Already recording '{current.name}'. Call stop_cassette_recording first."}
+    recorder = LiveCassetteRecorder(
+        name=name,
+        out_dir=CONFIG.cassette_dir,
+        snapshot_fn=lambda: controller.cassette_snapshot(capture_ocr=capture_ocr),
+        capture_images=capture_images,
+        settle_ms=settle_ms,
+    )
+    try:
+        info = recorder.start()
+    except FileExistsError as exc:
+        return {"success": False, "message": str(exc)}
+    hal.recorder = recorder
+    return {"success": True, "recording": True, **info}
+
+
+@mcp_server.tool()
+def stop_cassette_recording() -> Dict[str, Any]:
+    """
+    Stops the cassette recording and writes <cassette_dir>/<name>/index.json
+    (plus frames/*.jpg when images were captured). Returns the path and counts.
+    """
+    recorder = getattr(hal, "recorder", None)
+    if recorder is None or not recorder.active:
+        return {"success": False, "message": "No cassette recording is active."}
+    summary = recorder.stop()
+    hal.recorder = None
+    return {"success": True, "recording": False, **summary}
 
 
 @mcp_server.tool()

@@ -1,0 +1,35 @@
+{
+ "name": "example_click",
+ "frames": [
+  {
+   "frame_id": "f000",
+   "screen_size": [1280, 800],
+   "cursor_pos": [10, 10],
+   "windows": [{"window_id": "0x1", "title": "Demo Project", "bbox": {"x": 0, "y": 0, "width": 1280, "height": 800}, "is_active": true}],
+   "active_window": {"window_id": "0x1", "title": "Demo Project", "bbox": {"x": 0, "y": 0, "width": 1280, "height": 800}, "is_active": true},
+   "ax_tree": {"nodes": [{"role": "push button", "name": "Run Synthesis", "bbox": {"x": 40, "y": 120, "width": 120, "height": 28}, "states": ["enabled"]}]},
+   "ocr_boxes": [{"text": "Run Synthesis", "bbox": {"x": 44, "y": 126, "width": 110, "height": 16}, "click_point": [99, 134], "confidence": 0.98}],
+   "pixel_delta_from_prev": 0.0
+  },
+  {
+   "frame_id": "f001",
+   "screen_size": [1280, 800],
+   "cursor_pos": [100, 134],
+   "ax_tree": {"nodes": [{"role": "push button", "name": "Run Synthesis", "bbox": {"x": 40, "y": 120, "width": 120, "height": 28}, "states": ["disabled"]}]},
+   "ocr_boxes": [{"text": "Running synth_design...", "bbox": {"x": 400, "y": 760, "width": 200, "height": 16}, "click_point": [500, 768], "confidence": 0.95}],
+   "pixel_delta_from_prev": 0.04
+  },
+  {
+   "frame_id": "f002",
+   "screen_size": [1280, 800],
+   "cursor_pos": [100, 134],
+   "ax_tree": {"nodes": [{"role": "dialog", "name": "Synthesis Completed", "bbox": {"x": 440, "y": 300, "width": 400, "height": 180}, "states": ["enabled"]}, {"role": "push button", "name": "OK", "bbox": {"x": 760, "y": 440, "width": 60, "height": 26}, "states": ["enabled"]}]},
+   "ocr_boxes": [{"text": "Synthesis Completed", "bbox": {"x": 470, "y": 320, "width": 180, "height": 18}, "click_point": [560, 329], "confidence": 0.97}, {"text": "OK", "bbox": {"x": 780, "y": 446, "width": 20, "height": 14}, "click_point": [790, 453], "confidence": 0.99}],
+   "pixel_delta_from_prev": 0.12
+  }
+ ],
+ "transitions": [
+  {"pre_frame_id": "f000", "action": "mouse_click", "args": {"x": 100, "y": 134, "button": "left", "click_count": 1}, "post_frame_id": "f001"},
+  {"pre_frame_id": "f001", "action": "keyboard_press_key", "args": {"key_name": "Return"}, "post_frame_id": "f002"}
+ ]
+}

@@ -417,6 +417,49 @@ class FeedbackLoopController:
             pass
         return None
 
+    def cassette_snapshot(self, capture_ocr: bool = True) -> Tuple[Dict[str, Any], Optional[Any]]:
+        """
+        One cassette frame of the live desktop: AX nodes, OCR lines (screen
+        coordinates), windows, cursor and screen size, plus the screen image.
+        Each part is best effort so a missing backend never blocks recording.
+        """
+        frame: Dict[str, Any] = {}
+        try:
+            frame["screen_size"] = list(self.hal.get_screen_size())
+        except Exception:
+            pass
+        try:
+            frame["cursor_pos"] = list(self.hal.get_cursor_position())
+        except Exception:
+            pass
+        try:
+            frame["windows"] = [w.model_dump() for w in self.hal.list_windows()]
+            active = self.hal.get_active_window()
+            frame["active_window"] = active.model_dump() if active else None
+        except Exception:
+            pass
+        try:
+            elements = self.atspi_inspector.inspect() if self.atspi_inspector is not None else []
+            frame["ax_tree"] = {
+                "nodes": [
+                    {"role": e.role, "name": e.name, "bbox": e.bbox.model_dump(), "states": e.states}
+                    for e in elements
+                ]
+            }
+        except Exception:
+            frame["ax_tree"] = {}
+        image = None
+        try:
+            image = self.hal.capture_screen()
+        except Exception:
+            image = None
+        if capture_ocr and image is not None and self._ocr_available():
+            try:
+                frame["ocr_boxes"] = [ln.as_dict() for ln in self.ocr.recognize(image)]
+            except Exception:
+                frame["ocr_boxes"] = []
+        return frame, image
+
     def read_screen_lines(self, region: Optional[Tuple[int, int, int, int]] = None) -> List[OCRLine]:
         """OCR lines in screen coordinates for ``region`` (default: the active window)."""
         if not self._ocr_available():

@@ -152,6 +152,8 @@ Add `desktop-control` to your MCP client configuration file:
 | `execute_crystallized_skill` | Executes a saved parameterized script directly through the application CLI. |
 | `list_crystallized_skills` | Lists all saved crystallized skills. |
 | `delete_crystallized_skill` | Deletes a saved skill. |
+| `start_cassette_recording` | Records each input action plus AX, OCR and window state as a replayable cassette. |
+| `stop_cassette_recording` | Writes the cassette to `~/.desktop-control/cassettes/<name>/index.json`. |
 
 ### Plugins & Utilities
 | Tool | Description |
@@ -211,7 +213,16 @@ Run the full test suite with `pytest`:
 .venv/bin/pytest tests/
 ```
 
-All 89 tests cover HAL window management, quiescence monitoring, grounding strategies, modal triage, crystallization, self-healing cache, vDOM layout solvers, and trajectory execution.
+The tests cover HAL window management, quiescence monitoring, grounding strategies, modal triage, crystallization, self-healing cache, vDOM layout solvers, and trajectory execution.
+
+Recorded cassettes in `tests/cassettes/` replay offline and check their `expect.json`:
+
+```bash
+.venv/bin/pytest -m replay
+.venv/bin/python scripts/replay_cassette.py tests/cassettes/example_click
+```
+
+Record new ones from a live session with `start_cassette_recording` / `stop_cassette_recording` (toolset `skills`); see `tests/cassettes/README.md`.
 
 ---
 

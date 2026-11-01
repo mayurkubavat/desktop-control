@@ -56,3 +56,6 @@ include = ["vision_mcp*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "replay: replays recorded cassettes in tests/cassettes (pytest -m replay)",
+]

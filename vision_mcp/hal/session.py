@@ -43,10 +43,17 @@ class DesktopSession(IDesktopHAL):
         )
         self.quiescence = quiescence
         self.topology = topology
+        # Optional LiveCassetteRecorder; input methods report to it after acting.
+        self.recorder: Any = None
+
+    def _record(self, action: str, args: Dict[str, Any]) -> None:
+        rec = self.recorder
+        if rec is not None and getattr(rec, "active", False):
+            rec.after_action(action, args)
 
     def __getattr__(self, name: str) -> Any:
         """Backend-specific attributes (display_server, backing_scale, ...) pass through."""
-        if name == "backend":
+        if name in ("backend", "recorder"):
             raise AttributeError(name)
         return getattr(self.backend, name)
 
@@ -61,26 +68,36 @@ class DesktopSession(IDesktopHAL):
 
     def mouse_move(self, x: int, y: int) -> None:
         self.backend.mouse_move(x, y)
+        self._record("mouse_move", {"x": x, "y": y})
 
     def mouse_click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
         self.backend.mouse_click(x, y, button=button, click_count=click_count)
+        self._record("mouse_click", {"x": x, "y": y, "button": button, "click_count": click_count})
 
     def mouse_drag(
         self, start_x: int, start_y: int, end_x: int, end_y: int, duration_sec: float = 0.3
     ) -> None:
         self.backend.mouse_drag(start_x, start_y, end_x, end_y, duration_sec)
+        self._record(
+            "mouse_drag",
+            {"start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y, "duration_sec": duration_sec},
+        )
 
     def mouse_scroll(self, dx: int, dy: int) -> None:
         self.backend.mouse_scroll(dx, dy)
+        self._record("mouse_scroll", {"dx": dx, "dy": dy})
 
     def keyboard_type(self, text: str, delay_ms: float = 12.0) -> None:
         self.backend.keyboard_type(text, delay_ms=delay_ms)
+        self._record("keyboard_type", {"text": text, "delay_ms": delay_ms})
 
     def keyboard_press_key(self, key_name: str) -> None:
         self.backend.keyboard_press_key(key_name)
+        self._record("keyboard_press_key", {"key_name": key_name})
 
     def keyboard_hotkey(self, keys: List[str]) -> None:
         self.backend.keyboard_hotkey(keys)
+        self._record("keyboard_hotkey", {"keys": list(keys)})
 
     def list_windows(self) -> List[WindowInfo]:
         return self.backend.list_windows()
@@ -89,7 +106,9 @@ class DesktopSession(IDesktopHAL):
         return self.backend.get_active_window()
 
     def focus_window(self, window_id: str) -> bool:
-        return self.backend.focus_window(window_id)
+        ok = self.backend.focus_window(window_id)
+        self._record("focus_window", {"window_id": window_id})
+        return ok
 
     def get_accessibility_tree(
         self,

@@ -29,7 +29,7 @@ Crystallize only after the same path has worked twice. A skill compiled from a l
 4. `crystallize_skill(skill_name, task_prompt, app_target, extracted_entities, verification_cmd, description, cassette_path)`:
    - `extracted_entities`: the literals to lift into parameters, e.g. `{"runtime": "10us", "radix": "hex"}`.
    - `verification_cmd`: a Tcl check that proves success, e.g. a `get_value` or `report_*` that must match.
-   - `cassette_path`: optional. When given, the compiled macro is replayed against that cassette before it is registered, and a mismatch refuses registration.
+   - `cassette_path`: optional. When given, the compiled macro is replayed against that cassette before it is registered, and a mismatch refuses registration. Record one during step 2 with `start_cassette_recording(name)` / `stop_cassette_recording()` (the `eval` skill documents the cassette format and replay runner).
 5. Later: `list_crystallized_skills`, then `execute_crystallized_skill(skill_name, arguments)`.
 
 ## Naming and hygiene

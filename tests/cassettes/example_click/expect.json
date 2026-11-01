@@ -1,0 +1,6 @@
+{
+ "final_frame": "f002",
+ "text_present": ["Synthesis Completed"],
+ "text_absent": ["Error"],
+ "ax_names_present": ["OK"]
+}

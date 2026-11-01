@@ -333,3 +333,15 @@ def test_ax_inspector_includes_top_level_menu_bar(monkeypatch):
     assert [(e.name, e.role) for e in els] == [("File", "menu item"), ("OK", "push button")]  # closed menu not walked
     monkeypatch.setattr(CONFIG, "ax_include_menu_bar", False)
     assert [e.name for e in insp.inspect_desktop()] == ["OK"]
+
+
+def test_ax_inspector_hit_test_maps_role_and_frame():
+    sheet = _el("AXSheet", (0, 0, 400, 200), AXTitle="Save changes?")
+    ax = FakeAX({42: {"AXWindows": []}})
+    ax.AXUIElementCreateSystemWide = lambda: "system"
+    ax.AXUIElementCopyElementAtPosition = lambda el, x, y, _: (0, sheet)
+    insp = AXInspector(ax=ax, appkit=FakeAppKit(front_pid=42), screen_bounds=(0, 0, 1512, 982))
+    hit = insp.hit_test(10, 10)
+    assert hit == {"role": "dialog", "name": "Save changes?", "bbox": {"x": 0, "y": 0, "width": 400, "height": 200}}
+    ax.AXUIElementCopyElementAtPosition = lambda el, x, y, _: (-25204, None)
+    assert insp.hit_test(10, 10) is None

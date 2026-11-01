@@ -121,6 +121,19 @@ class VisionConfig(BaseModel):
             "(Claude, VS Code, Slack) expose their web content to the AX tree."
         ),
     )
+    settle_timeout_s: float = Field(
+        default=2.5,
+        description="Screen state: longest wait for the window to stop changing before reading it.",
+    )
+    settle_interval_s: float = Field(default=0.12, description="Screen state: time between settle samples.")
+    settle_max_delta: float = Field(
+        default=1.5,
+        description="Screen state: mean grayscale difference (0-255) of 64 px thumbnails that still counts as still.",
+    )
+    screen_state_max_icons: int = Field(
+        default=20,
+        description="Screen state: most unnamed icon-detector boxes added to an observation.",
+    )
     ax_include_menu_bar: bool = Field(
         default=True,
         description="Include the frontmost app's top-level menu bar items in the macOS AX tree.",

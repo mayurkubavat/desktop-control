@@ -127,6 +127,7 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "get_screen_state": ("advanced_vision", "Numbered text-only view of the active window (AX + OCR) with valid operations"),
     "act_on_element": ("advanced_vision", "Clicks or types on a screen-state element after re-binding it on a fresh frame"),
     "decide_next_element": ("advanced_vision", "Local Gemma picks the next screen-state element for a goal, gated by risk"),
+    "decide_visual_element": ("advanced_vision", "Local Gemma picks a control from a marked-up screenshot when it has no text label"),
     "choose_option": ("advanced_vision", "Local Gemma picks one option with calibrated probabilities, gated by risk"),
     "read_screen_text": ("core", "Extracts screen text via local OCR"),
     "find_visual_element": ("advanced_vision", "Finds visual elements without accessibility names"),
@@ -897,6 +898,8 @@ def get_screen_state(
     use_ocr: bool = True,
     max_elements: int = 60,
     as_text: bool = True,
+    settle: bool = True,
+    include_icons: bool = False,
 ) -> Dict[str, Any]:
     """
     Observes the active window as a numbered, text-only list of elements (e1, e2, ...)
@@ -911,11 +914,17 @@ def get_screen_state(
         use_ocr: Also read text with local OCR (names unlabeled controls, adds text-only targets).
         max_elements: Cap on elements returned.
         as_text: Return the compact text view (default) instead of full element dicts.
+        settle: First wait (up to ~2.5 s) until the window stops changing, so a half-loaded
+            page is not read as the result.
+        include_icons: Add unnamed icon-detector boxes the accessibility tree missed
+            ("seen, not named"); pick among them with decide_visual_element.
     """
     from dobby.screen_state.observe import observe
 
-    state = observe(controller, _tracker(), app_name_filter=app_name_filter, use_ocr=use_ocr)
-    out = {"generation": state.generation, "element_count": len(state.elements), "operations": state.operations}
+    state = observe(controller, _tracker(), app_name_filter=app_name_filter, use_ocr=use_ocr,
+                    settle=settle, use_detector=include_icons)
+    out = {"generation": state.generation, "element_count": len(state.elements), "operations": state.operations,
+           "settle": state.settle}
     if as_text:
         out["state"] = state.to_text(max_elements=max(1, int(max_elements)))
     else:
@@ -936,8 +945,10 @@ def act_on_element(
     Clicks, double-clicks or types on an element from get_screen_state, after re-binding
     it on a fresh observation (by role and label, nearest to its old place).
 
-    Refuses when the element is gone, moved too far, disabled, or (for type) not
-    editable or a password field. Returns the new generation and what changed.
+    Refuses when the element is gone, moved too far, disabled, covered by another
+    window or popover (window order and accessibility hit test), or (for type) not
+    editable or a password field. After acting it waits for the screen to settle,
+    then returns the new generation and what changed.
 
     Args:
         eid: Element id such as "e7" from get_screen_state.
@@ -960,6 +971,7 @@ def decide_next_element(
     authorized: bool = False,
     shortlist_to: int = 12,
     app_name_filter: Optional[str] = None,
+    visual_fallback: bool = True,
 ) -> Dict[str, Any]:
     """
     Observes the screen, shortlists elements by word overlap with the goal, and lets
@@ -975,6 +987,8 @@ def decide_next_element(
         authorized: True only when the user explicitly asked for this consequential action.
         shortlist_to: Maximum elements shown to Gemma (<= 25).
         app_name_filter: Optional app to inspect.
+        visual_fallback: When the text view escalates, retry once on a marked-up screenshot
+            (decide_visual_element) for controls without text labels.
     """
     from dobby.gemma.decide import GemmaError
     from dobby.screen_state.observe import decide_next_element as _decide
@@ -984,7 +998,43 @@ def decide_next_element(
         return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
     try:
         return _decide(controller, _tracker(), grounder.decider(), goal, verb=verb, authorized=authorized,
-                       k=shortlist_to, app_name_filter=app_name_filter)
+                       k=shortlist_to, app_name_filter=app_name_filter, visual_fallback=visual_fallback)
+    except (GemmaError, ValueError) as e:
+        return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
+
+
+@mcp_server.tool()
+def decide_visual_element(
+    goal: str,
+    verb: str = "click",
+    authorized: bool = False,
+    max_marks: int = 20,
+    app_name_filter: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Picks a control from a screenshot when the text view has no name for it (toolbar
+    icons, canvas apps, custom widgets). The icon detector adds boxes the accessibility
+    tree missed; local Gemma sees the window with lettered boxes and picks a letter
+    (probabilities from logprobs), then a close-up yes/no check confirms it. Click points
+    come from the boxes, never from the model. Nothing is clicked: when ``gate.verdict``
+    is "act", call act_on_element with the returned ``eid`` and ``generation``.
+
+    Args:
+        goal: What the user wants done next (e.g. "zoom to fit the waveform").
+        verb: The action that follows: sets the risk tier.
+        authorized: True only when the user explicitly asked for this consequential action.
+        max_marks: Most boxes drawn (<= 20).
+        app_name_filter: Optional app to inspect.
+    """
+    from dobby.gemma.decide import GemmaError
+    from dobby.screen_state.visual import decide_visual_element as _visual
+
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if grounder is None:
+        return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
+    try:
+        return _visual(controller, _tracker(), grounder.decider(), goal, verb=verb, authorized=authorized,
+                       max_marks=max_marks, app_name_filter=app_name_filter)
     except (GemmaError, ValueError) as e:
         return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
 

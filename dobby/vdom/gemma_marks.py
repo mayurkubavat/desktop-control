@@ -92,10 +92,11 @@ def _font(size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def draw_marks(image: Image.Image, boxes: Sequence[Box], max_side: int) -> Image.Image:
+def draw_marks(image: Image.Image, boxes: Sequence[Box], max_side: int, labels: Optional[Sequence[str]] = None) -> Image.Image:
     """
     Downscales ``image`` to ``max_side`` and draws numbered boxes (1-based, in
-    ``boxes`` order). Badges are drawn after the downscale so they stay legible.
+    ``boxes`` order), or the given ``labels`` (e.g. letters for a logprob choice).
+    Badges are drawn after the downscale so they stay legible.
     """
     w, h = image.size
     scale = min(1.0, max_side / float(max(w, h)))
@@ -109,7 +110,7 @@ def draw_marks(image: Image.Image, boxes: Sequence[Box], max_side: int) -> Image
         x0, y0 = int(bx * scale), int(by * scale)
         x1, y1 = int((bx + bw) * scale), int((by + bh) * scale)
         draw.rectangle([x0, y0, x1, y1], outline=color, width=2)
-        label = str(idx + 1)
+        label = str(labels[idx]) if labels is not None and idx < len(labels) else str(idx + 1)
         tb = draw.textbbox((0, 0), label, font=font)
         tw, th = tb[2] - tb[0] + 6, tb[3] - tb[1] + 6
         ty = y0 - th if y0 >= th else y0

@@ -9,8 +9,11 @@ so cassette replay works unchanged.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from dobby.config import CONFIG
+from dobby.screen_state.occlusion import check_occlusion
+from dobby.screen_state.settle import settle_window
 from dobby.screen_state.state import MENU_BAR_HEIGHT, ScreenState, StateTracker, build_state, rebind
 
 logger = logging.getLogger(__name__)
@@ -50,8 +53,17 @@ def observe(
     app_name_filter: Optional[str] = None,
     use_ocr: bool = True,
     clip_to_window: bool = True,
+    settle: bool = False,
+    use_detector: bool = False,
 ) -> ScreenState:
-    """One fresh observation of the active window as a numbered :class:`ScreenState`."""
+    """
+    One fresh observation of the active window as a numbered :class:`ScreenState`.
+
+    ``settle`` first waits until the window stops changing (loading pages,
+    sliding sheets), so a half-drawn screen is not read as the result.
+    ``use_detector`` adds unnamed icon boxes the accessibility tree and OCR
+    missed (for :func:`decide_visual_element`).
+    """
     generation = tracker.next_generation()
     win = None
     try:
@@ -59,6 +71,13 @@ def observe(
     except Exception as e:
         logger.debug("active window unavailable: %s", e)
     region = _window_region(win) if win is not None else None
+
+    settled = None
+    if settle:
+        settled = settle_window(
+            controller, region,
+            timeout_s=CONFIG.settle_timeout_s, interval_s=CONFIG.settle_interval_s, max_delta=CONFIG.settle_max_delta,
+        ).as_dict()
 
     try:
         nodes = controller.get_accessibility_tree(app_name_filter=app_name_filter, filter_interactable=True) or []
@@ -81,8 +100,42 @@ def observe(
             logger.debug("OCR unavailable: %s", e)
             lines = []
 
-    state = build_state(nodes, lines, window=win, generation=generation)
+    boxes = detect_icon_boxes(controller, region) if use_detector else []
+
+    state = build_state(nodes, lines, window=win, generation=generation,
+                        detector_boxes=boxes, max_detector_elements=CONFIG.screen_state_max_icons)
+    state.window_id = str(win.window_id) if win is not None and getattr(win, "window_id", None) is not None else None
+    state.settle = settled
     return tracker.remember(state)
+
+
+def detect_icon_boxes(controller: Any, region: Optional[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
+    """Icon-detector boxes (screen coordinates) inside ``region``, largest first; [] when unavailable.
+
+    Largest first keeps real controls ahead of glyph fragments; boxes that
+    contain named elements (panels) are dropped later by ``build_state``.
+    """
+    grounder = getattr(controller, "neural_grounder", None)
+    if grounder is None or not hasattr(grounder, "generate_proposals"):
+        return []
+    try:
+        img = controller.hal.capture_screen(region=region)
+        ox, oy = (region[0], region[1]) if region else (0, 0)
+        proposals = grounder.generate_proposals(img, offset=(ox, oy)) or []
+    except Exception as e:
+        logger.debug("icon detector unavailable: %s", e)
+        return []
+    out = []
+    for p in proposals:
+        b = p.get("bbox") if isinstance(p, dict) else None
+        if not b:
+            continue
+        try:
+            out.append((int(b["x"]), int(b["y"]), int(b["width"]), int(b["height"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    out.sort(key=lambda bx: bx[2] * bx[3], reverse=True)
+    return out
 
 
 def summarize_change(before: ScreenState, after: ScreenState) -> Dict[str, Any]:
@@ -128,7 +181,7 @@ def act_on_element(
     if action == "type" and not text:
         return {"ok": False, "reason": "type needs text"}
 
-    fresh = observe(controller, tracker, app_name_filter=app_name_filter)
+    fresh = observe(controller, tracker, app_name_filter=app_name_filter, use_detector=chosen.source == "detector")
     target = rebind(chosen, fresh)
     if target is None:
         return {
@@ -144,6 +197,16 @@ def act_on_element(
 
     cx, cy = target.center
     hal = controller.hal
+
+    inspector = getattr(controller, "atspi_inspector", None)
+    occlusion = check_occlusion(
+        hal, (target.x, target.y, target.width, target.height), (cx, cy),
+        target_window_id=fresh.window_id, target_role=target.role,
+        hit_test=getattr(inspector, "hit_test", None), in_menu_bar=target.position == "menu bar",
+    )
+    if occlusion.covered:
+        return {"ok": False, "reason": f"{target.describe()} is {occlusion.reason}", "occlusion": occlusion.as_dict(),
+                "generation": fresh.generation}
 
     def _do() -> None:
         hal.mouse_click(cx, cy, button="left", click_count=2 if action == "double_click" else 1)
@@ -163,7 +226,7 @@ def act_on_element(
     except Exception as e:
         return {"ok": False, "reason": f"action failed: {e}", "generation": fresh.generation}
 
-    after = observe(controller, tracker, app_name_filter=app_name_filter)
+    after = observe(controller, tracker, app_name_filter=app_name_filter, settle=True)
     change = summarize_change(fresh, after)
     return {
         "ok": True,
@@ -172,6 +235,8 @@ def act_on_element(
         "generation": after.generation,
         "fresh_after_action": tracker.is_fresh(after),
         "change": change,
+        "settle": after.settle,
+        "occlusion": occlusion.as_dict(),
         "verification": {k: verification.get(k) for k in ("success", "delta_detected", "change_ratio", "message") if isinstance(verification, dict) and k in verification},
     }
 
@@ -186,7 +251,8 @@ def decide_next_element(
     k: int = 12,
     app_name_filter: Optional[str] = None,
     confirm: bool = True,
-    confirm_at: float = 0.7,
+    confirm_at: float = 0.9,
+    visual_fallback: bool = False,
 ) -> Dict[str, Any]:
     """
     Observes, shortlists elements by the goal, lets the local decider choose one,
@@ -197,14 +263,20 @@ def decide_next_element(
     ("using X advances the goal"). A choice is always relative to the
     shortlist, so it stays confident when the right target is missing; the
     yes/no is absolute, so a "no" there downgrades "act" to "escalate".
+
+    With ``visual_fallback``, an "escalate" from the text lane retries once on
+    the screenshot (:func:`dobby.screen_state.visual.decide_visual_element`),
+    for controls that have no text label; the text result is kept under
+    ``text_lane``.
     """
     from dobby.gemma.decide import shortlist
     from dobby.gemma.gate import GateResult, Verdict, gate
 
-    state = observe(controller, tracker, app_name_filter=app_name_filter)
+    state = observe(controller, tracker, app_name_filter=app_name_filter, settle=True)
     candidates = shortlist(goal, state.elements, k=max(1, min(25, k)), text=lambda e: f"{e.role} {e.label}")
     if not candidates:
-        return {"generation": state.generation, "eid": None, "gate": {"verdict": "escalate", "reason": "no elements on screen"}}
+        out = {"generation": state.generation, "eid": None, "gate": {"verdict": "escalate", "reason": "no elements on screen"}}
+        return _visual_retry(out, controller, tracker, decider, goal, verb, authorized, app_name_filter) if visual_fallback else out
     ctx = f"Goal: {goal.strip()}\n" + state.to_text(elements=[], max_text_lines=10)
     options = [e.describe() for e in candidates]
     decision = decider.choose(ctx, f"Which element should be used to {verb} next to advance the goal?", options)
@@ -224,11 +296,30 @@ def decide_next_element(
         if confirmation is None or confirmation.p_true < confirm_at:
             p_txt = "failed" if confirmation is None else f"p={confirmation.p_true:.2f} < {confirm_at:.2f}"
             result = GateResult(Verdict.ESCALATE, f"confirmation disagrees ({p_txt}): target may not be on screen", result.risk)
-    return {
+    out = {
         "generation": state.generation,
         "eid": eid,
         "element": candidates[decision.index].as_dict() if eid else None,
         "decision": decision.as_dict(),
         "gate": result.as_dict(),
         "confirmation": confirmation.as_dict() if confirmation is not None else None,
+        "settle": state.settle,
+        "source": "text",
     }
+    if visual_fallback and result.verdict == Verdict.ESCALATE:
+        return _visual_retry(out, controller, tracker, decider, goal, verb, authorized, app_name_filter)
+    return out
+
+
+def _visual_retry(text_out: Dict[str, Any], controller: Any, tracker: StateTracker, decider: Any, goal: str,
+                  verb: str, authorized: bool, app_name_filter: Optional[str]) -> Dict[str, Any]:
+    from dobby.screen_state.visual import decide_visual_element
+
+    try:
+        visual = decide_visual_element(controller, tracker, decider, goal, verb=verb, authorized=authorized,
+                                       app_name_filter=app_name_filter)
+    except Exception as e:
+        logger.debug("visual fallback failed: %s", e)
+        return {**text_out, "visual_error": str(e)}
+    brief = {k: text_out.get(k) for k in ("generation", "eid", "gate", "confirmation")}
+    return {**visual, "text_lane": brief}

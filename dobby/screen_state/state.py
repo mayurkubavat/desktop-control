@@ -40,7 +40,7 @@ class ScreenElement:
     y: int
     width: int
     height: int
-    source: str = "ax"  # "ax", "ax+ocr" (label from OCR), or "ocr"
+    source: str = "ax"  # "ax", "ax+ocr" (label from OCR), "ocr", or "detector" (icon box, no name)
     states: Tuple[str, ...] = ()
     position: str = ""
 
@@ -75,6 +75,8 @@ class ScreenElement:
             bits.append("selected")
         if self.source == "ocr":
             bits.append("text only")
+        elif self.source == "detector":
+            bits.append("seen, not named")
         label = self.label.replace('"', "'")[:80] if self.label else "(no label)"
         extra = f" ({', '.join(bits)})" if bits else ""
         return f'{self.eid} {self.role} "{label}"{extra}'
@@ -104,6 +106,8 @@ class ScreenState:
     elements: List[ScreenElement] = field(default_factory=list)
     text: List[str] = field(default_factory=list)  # OCR lines not attached to any element
     operations: List[str] = field(default_factory=list)
+    window_id: Optional[str] = None
+    settle: Optional[Dict[str, Any]] = None  # how long observe waited for the screen to stop changing
 
     def get(self, eid: str) -> Optional[ScreenElement]:
         for el in self.elements:
@@ -198,6 +202,8 @@ def build_state(
     captured_at: Optional[float] = None,
     max_ocr_elements: int = 40,
     min_ocr_confidence: float = 0.3,
+    detector_boxes: Iterable[Tuple[int, int, int, int]] = (),
+    max_detector_elements: int = 20,
 ) -> ScreenState:
     """
     Merges AX elements and OCR lines (both in screen coordinates) into a :class:`ScreenState`.
@@ -207,6 +213,9 @@ def build_state(
     - OCR lines outside every AX control become ``text`` elements (clickable by
       their box) up to ``max_ocr_elements``, so canvas apps still get targets.
     - Elements are ordered top-to-bottom, left-to-right and numbered ``e1``...
+    - ``detector_boxes`` (icon detector, screen coordinates) that no AX control
+      or OCR text already covers become unnamed ``icon`` elements, so controls
+      the accessibility tree cannot see still get an id (for visual choice).
     - ``type`` is offered only when an editable, non-secure element has focus;
       ``scroll`` only when something scrollable is visible.
     """
@@ -266,6 +275,26 @@ def build_state(
             ocr_added += 1
         else:
             loose.append(text)
+
+    det_added = 0
+    for box in detector_boxes:
+        if det_added >= max_detector_elements:
+            break
+        try:
+            box = tuple(int(v) for v in box)
+        except (TypeError, ValueError):
+            continue
+        if len(box) != 4 or box[2] < 8 or box[3] < 8:
+            continue
+        cx, cy = box[0] + box[2] // 2, box[1] + box[3] // 2
+        if frame is not None and not _inside(cx, cy, frame):
+            continue
+        # Already known: its center sits inside a named element, or a named element sits inside it.
+        if any(_inside(cx, cy, r["box"]) or _inside(r["box"][0] + r["box"][2] // 2, r["box"][1] + r["box"][3] // 2, box)
+               for r in raw):
+            continue
+        raw.append({"role": "icon", "label": "", "box": box, "source": "detector", "states": ()})
+        det_added += 1
 
     raw.sort(key=lambda r: (r["box"][1] // 8, r["box"][0]))
     elements = []

@@ -214,6 +214,32 @@ class AXInspector:
         except Exception:
             return None
 
+    def hit_test(self, x: int, y: int) -> Optional[dict]:
+        """The deepest element at screen point (x, y) as ``{"role", "name", "bbox"}``, or None."""
+        if not self.is_available:
+            return None
+        try:
+            system = self._ax.AXUIElementCreateSystemWide()
+            err, el = self._ax.AXUIElementCopyElementAtPosition(system, float(x), float(y), None)
+        except Exception:
+            return None
+        if err != 0 or el is None:
+            return None
+        ax_role = str(self._attr(el, "AXRole") or "")
+        subrole = str(self._attr(el, "AXSubrole") or "")
+        role = AX_ROLE_MAP.get(ax_role, ax_role.replace("AX", "").lower() or "unknown")
+        if ax_role == "AXWindow" and subrole in DIALOG_SUBROLES:
+            role = "dialog"
+        name = ""
+        for attr in ("AXTitle", "AXDescription", "AXValue"):
+            v = self._attr(el, attr)
+            if isinstance(v, str) and v.strip():
+                name = v.strip()[:120]
+                break
+        frame = self._frame(el)
+        bbox = {"x": frame[0], "y": frame[1], "width": frame[2], "height": frame[3]} if frame else None
+        return {"role": role, "name": name, "bbox": bbox}
+
     def inspect(self) -> List[UIElement]:
         """All elements (not just interactable) of the frontmost app."""
         return self.inspect_desktop(filter_interactable=False)

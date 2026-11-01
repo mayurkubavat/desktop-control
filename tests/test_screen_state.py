@@ -201,16 +201,21 @@ def test_act_type_clicks_then_types_without_enter_by_default():
 
 
 class FakeLogprobOllama:
-    def __init__(self, top):
+    """Answers choice questions with ``top`` and yes/no questions with ``yes_no``."""
+
+    def __init__(self, top, yes_no=(("yes", math.log(0.95)), ("no", math.log(0.05)))):
         self.top = top
+        self.yes_no = yes_no
+        self.bodies = []
 
     def __call__(self, method, url, body, timeout):
         if url.endswith("/api/tags"):
             return {"models": [{"name": "gemma3:4b"}]}
-        self.body = body
-        return {"message": {"content": self.top[0][0]},
-                "logprobs": [{"token": self.top[0][0], "logprob": self.top[0][1],
-                              "top_logprobs": [{"token": t, "logprob": lp} for t, lp in self.top]}]}
+        self.bodies.append(body)
+        top = self.yes_no if "Statement:" in body["messages"][1]["content"] else self.top
+        return {"message": {"content": top[0][0]},
+                "logprobs": [{"token": top[0][0], "logprob": top[0][1],
+                              "top_logprobs": [{"token": t, "logprob": lp} for t, lp in top]}]}
 
 
 def test_decide_next_element_maps_choice_to_eid_and_gates():
@@ -222,6 +227,28 @@ def test_decide_next_element_maps_choice_to_eid_and_gates():
     # shortlist puts "Save" first (word overlap), so option A = Save
     assert out["element"]["label"] == "Save" and out["eid"] == "e3"
     assert out["gate"]["verdict"] == "act"
-    assert "Goal: save the document" in fake.body["messages"][1]["content"]
+    assert "Goal: save the document" in fake.bodies[0]["messages"][1]["content"]
+    assert out["confirmation"]["p_true"] > 0.9 and len(fake.bodies) == 2
     out2 = decide_next_element(ctl, StateTracker(), decider, "save the document", verb="delete")
     assert out2["gate"]["verdict"] == "stop"  # consequential without authorization
+
+
+def test_confirmation_no_downgrades_act_to_escalate():
+    ctl = FakeController([[node("label", "FILES", 20, 80), node("push button", "Save", 780, 550)]])
+    fake = FakeLogprobOllama([("A", math.log(0.99)), ("B", math.log(0.01))],
+                             yes_no=(("no", math.log(0.9)), ("yes", math.log(0.1))))
+    out = decide_next_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "open the File menu")
+    assert out["gate"]["verdict"] == "escalate" and "confirmation disagrees" in out["gate"]["reason"]
+    out2 = decide_next_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "open the File menu", confirm=False)
+    assert out2["gate"]["verdict"] == "act" and out2["confirmation"] is None
+
+
+def test_menu_bar_items_survive_window_clipping():
+    win = WindowInfo(window_id="1", title="Notes", bbox=BoundingBox(x=0, y=30, width=900, height=600),
+                     is_active=True, app_name="Notes")
+    ctl = FakeController([[node("menu item", "File", 60, 2, 40, 22), node("push button", "OK", 10, 100),
+                           node("push button", "Far", 2000, 2), node("label", "Clock", 1200, 2, 60, 22)]])
+    ctl.hal.get_active_window = lambda: win
+    s = observe(ctl, StateTracker())
+    labels = {e.label: e for e in s.elements}
+    assert set(labels) == {"File", "OK"} and labels["File"].position == "menu bar"

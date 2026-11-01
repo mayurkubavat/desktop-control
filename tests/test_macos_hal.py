@@ -317,3 +317,19 @@ def test_ax_inspector_wrapper_groups_do_not_use_depth():
     insp = AXInspector(ax=FakeAX({42: {"AXWindows": [win]}}), appkit=FakeAppKit(front_pid=42),
                        screen_bounds=(0, 0, 1512, 982))
     assert [e.name for e in insp.inspect_desktop(max_depth=4)] == ["Deep"]
+
+
+def test_ax_inspector_includes_top_level_menu_bar(monkeypatch):
+    from vision_mcp.config import CONFIG
+
+    item_in_menu = _el("AXMenuItem", (60, 30, 120, 20), AXTitle="New Note")
+    menu = _el("AXMenu", (60, 25, 200, 300), children=[item_in_menu])
+    file_item = _el("AXMenuBarItem", (60, 0, 40, 24), children=[menu], AXTitle="File", AXEnabled=True)
+    bar = _el("AXMenuBar", (0, 0, 1512, 24), children=[file_item])
+    win = _el("AXWindow", (0, 30, 800, 600), children=[_el("AXButton", (10, 60, 40, 20), AXTitle="OK")], AXTitle="W")
+    tree = {42: {"AXWindows": [win], "AXMenuBar": bar}}
+    insp = AXInspector(ax=FakeAX(tree), appkit=FakeAppKit(front_pid=42), screen_bounds=(0, 0, 1512, 982))
+    els = insp.inspect_desktop()
+    assert [(e.name, e.role) for e in els] == [("File", "menu item"), ("OK", "push button")]  # closed menu not walked
+    monkeypatch.setattr(CONFIG, "ax_include_menu_bar", False)
+    assert [e.name for e in insp.inspect_desktop()] == ["OK"]

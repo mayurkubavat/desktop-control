@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # AT-SPI role names (the AX inspector maps macOS roles onto these).
 EDITABLE_ROLES = {"entry", "text", "combo box", "spin button", "password text", "search field", "editbar"}
 SECURE_ROLES = {"password text"}
+MENU_BAR_HEIGHT = 40  # macOS menu bar band (points from the top of the main screen)
 CLICKABLE_ROLES = {
     "push button", "toggle button", "check box", "radio button", "menu item", "link", "page tab",
     "combo box", "list item", "table cell", "entry", "text", "slider", "spin button", "password text", "icon",
@@ -175,6 +176,8 @@ def coarse_position(cx: int, cy: int, frame: Optional[Tuple[int, int, int, int]]
     if not frame or frame[2] <= 0 or frame[3] <= 0:
         return ""
     fx, fy, fw, fh = frame
+    if cy < fy and cy <= MENU_BAR_HEIGHT:
+        return "menu bar"
     rx = (cx - fx) / fw
     ry = (cy - fy) / fh
     row = "top" if ry < 1 / 3 else ("middle" if ry < 2 / 3 else "bottom")

@@ -964,6 +964,8 @@ def decide_next_element(
     """
     Observes the screen, shortlists elements by word overlap with the goal, and lets
     the local Gemma pick one (probabilities from logprobs), gated by the verb's risk.
+    A second yes/no question confirms the pick; if it disagrees, the verdict becomes
+    "escalate" (the right target may not be on screen). The app's menu bar is included.
     Nothing is clicked. When ``gate.verdict`` is "act", call act_on_element with the
     returned ``eid`` and ``generation``; "escalate" means decide yourself; "stop" means do not act.
 

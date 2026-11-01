@@ -191,6 +191,12 @@ class AXInspector:
             time.sleep(CONFIG.ax_web_content_settle_seconds)
 
         deadline = time.monotonic() + self.max_seconds
+        if CONFIG.ax_include_menu_bar and apps:
+            # Top-level menu bar items of the first (frontmost) app only: depth 2 stops
+            # before the closed menus, which have no on-screen frame anyway.
+            bar = self._attr(apps[0], "AXMenuBar")
+            if bar is not None:
+                self._walk(bar, 1, 2, filter_interactable, elements, deadline, budget, screen, parent_role="")
         for root in apps:
             for win in self._attr(root, "AXWindows") or []:
                 self._walk(win, 1, max_depth, filter_interactable, elements, deadline, budget, screen, parent_role="")

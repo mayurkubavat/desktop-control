@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from vision_mcp.screen_state.state import ScreenState, StateTracker, build_state, rebind
+from vision_mcp.screen_state.state import MENU_BAR_HEIGHT, ScreenState, StateTracker, build_state, rebind
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,15 @@ def _overlaps(box: Dict[str, Any], region: Tuple[int, int, int, int]) -> bool:
         return False
     rx, ry, rw, rh = region
     return x + w > rx and y + h > ry and x < rx + rw and y < ry + rh
+
+
+def _in_menu_bar(node: Dict[str, Any]) -> bool:
+    """A menu bar item of the frontmost app (outside the window, at the top of the screen)."""
+    box = node.get("bbox") or {}
+    try:
+        return node.get("role") == "menu item" and int(box["y"]) + int(box["height"]) <= MENU_BAR_HEIGHT
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def observe(
@@ -58,7 +67,11 @@ def observe(
         nodes = []
     nodes = [n.model_dump() if hasattr(n, "model_dump") else n for n in nodes if n]
     if clip_to_window and region is not None:
-        nodes = [n for n in nodes if isinstance(n, dict) and _overlaps(n.get("bbox") or {}, region)]
+        # The app's menu bar lives outside its window; keep it so "open the File menu" has a target.
+        nodes = [
+            n for n in nodes
+            if isinstance(n, dict) and (_overlaps(n.get("bbox") or {}, region) or _in_menu_bar(n))
+        ]
 
     lines = []
     if use_ocr:
@@ -172,14 +185,21 @@ def decide_next_element(
     authorized: bool = False,
     k: int = 12,
     app_name_filter: Optional[str] = None,
+    confirm: bool = True,
+    confirm_at: float = 0.7,
 ) -> Dict[str, Any]:
     """
     Observes, shortlists elements by the goal, lets the local decider choose one,
     and gates the choice by the verb's risk. Acts on nothing: the caller acts
     only when ``gate.verdict`` is "act" (then :func:`act_on_element`).
+
+    With ``confirm`` a second, overlapping yes/no question checks the pick
+    ("using X advances the goal"). A choice is always relative to the
+    shortlist, so it stays confident when the right target is missing; the
+    yes/no is absolute, so a "no" there downgrades "act" to "escalate".
     """
     from vision_mcp.gemma.decide import shortlist
-    from vision_mcp.gemma.gate import gate
+    from vision_mcp.gemma.gate import GateResult, Verdict, gate
 
     state = observe(controller, tracker, app_name_filter=app_name_filter)
     candidates = shortlist(goal, state.elements, k=max(1, min(25, k)), text=lambda e: f"{e.role} {e.label}")
@@ -190,10 +210,25 @@ def decide_next_element(
     decision = decider.choose(ctx, f"Which element should be used to {verb} next to advance the goal?", options)
     eid = None if decision.is_none else candidates[decision.index].eid
     result = gate(decision, verb, authorized=authorized)
+    confirmation = None
+    if confirm and eid and result.act:
+        target = candidates[decision.index]
+        try:
+            confirmation = decider.noul(
+                f"Goal: {goal.strip()}\n" + state.to_text(max_elements=40, max_text_lines=10),
+                f"To {goal.strip()}, the next step is to {verb} {target.describe()}.",
+                question_id="confirm_element",
+            )
+        except Exception as e:  # a failed check must not turn into "act"
+            logger.debug("confirmation failed: %s", e)
+        if confirmation is None or confirmation.p_true < confirm_at:
+            p_txt = "failed" if confirmation is None else f"p={confirmation.p_true:.2f} < {confirm_at:.2f}"
+            result = GateResult(Verdict.ESCALATE, f"confirmation disagrees ({p_txt}): target may not be on screen", result.risk)
     return {
         "generation": state.generation,
         "eid": eid,
         "element": candidates[decision.index].as_dict() if eid else None,
         "decision": decision.as_dict(),
         "gate": result.as_dict(),
+        "confirmation": confirmation.as_dict() if confirmation is not None else None,
     }

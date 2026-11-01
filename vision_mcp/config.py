@@ -121,6 +121,10 @@ class VisionConfig(BaseModel):
             "(Claude, VS Code, Slack) expose their web content to the AX tree."
         ),
     )
+    ax_include_menu_bar: bool = Field(
+        default=True,
+        description="Include the frontmost app's top-level menu bar items in the macOS AX tree.",
+    )
     ax_web_content_settle_seconds: float = Field(
         default=0.4,
         description="After first enabling web-content AX on an app, wait this long for Chromium to build its tree.",

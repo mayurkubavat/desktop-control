@@ -1,0 +1,60 @@
+---
+name: orchestrator
+description: Entry point for any task that drives the Mac or Linux desktop through the desktop-control MCP server. Covers the cheapest-first perception ladder, verified actions, recovery, safety, and which desktop-control skill to load next.
+---
+
+# Desktop-control orchestrator
+
+You plan; desktop-control and local Gemma perceive and verify. Gemma never plans and never gives click coordinates. Coordinates come from the accessibility tree, OCR boxes or numbered marks.
+
+## Load the right companion skill
+
+| Situation | Load |
+| --- | --- |
+| Unsure which perception tool fits, or need a tool's parameters | `desktop-control:perception` |
+| Working in the Claude app, Chrome, Vivado or Verdi | `desktop-control:app-claude`, `app-chrome`, `app-vivado`, `app-verdi` |
+| The task will repeat | `desktop-control:skill-crafting` |
+| Changing prompts, models or server code | `desktop-control:eval` |
+| A tool is missing, permission errors, empty AX tree, Gemma unavailable | `desktop-control:troubleshoot` |
+
+## 0. Before the first action
+
+- If a tool below is missing, call `manage_toolsets(action="list_domains")`, then `manage_toolsets(action="enable", domains=[...])`. `core` holds the AX, OCR and ask tools.
+- `list_windows`, then `focus_window(window_id)` on the target app. Never act on a window you have not focused.
+- `list_crystallized_skills`: if a skill already does the task, use `execute_crystallized_skill(skill_name, arguments)` and stop.
+- On macOS, shortcuts use `cmd`, not `ctrl`.
+
+## 1. Perception ladder (cheapest first; stop at the first rung that answers)
+
+1. `get_accessibility_tree(app_name_filter="<App>")`: names, roles, boxes, zero image tokens. After the first full read use `diff_only=true`.
+2. `find_element(query, role)` or `find_and_click(query)` when you know the label.
+3. `read_screen_text(contains="<text>")`: local OCR with click points.
+4. `ask_screen(question, expected_text=...)`: local yes/no. Pass `expected_text` when the answer is a visible word, so OCR settles it without Gemma.
+5. `find_visual_element(description)`: unnamed icons, picked by local Gemma from detector boxes.
+6. `take_screenshot(mode="annotated_som", clip_to_active_window=true)`: marks plus a resource URI, no pixels. Click by `mark_id`.
+7. `take_screenshot(..., include_image=true)`: last resort. At most one image per five actions.
+
+## 2. Acting
+
+- Every `click` carries a contract: `expected_outcome={"assert_screen_text": "Saved"}`, `{"assert_screen_text_not_present": "Unsaved"}` or `{"expect_ax_change": true}`. The server verifies locally and returns a verdict with the tier used. Read the verdict; do not screenshot to check.
+- Prefer `click_and_type(query, text, press_enter)` to separate click and type.
+- For 3 or more known steps, send one `execute_trajectory(trajectory_spec)`; it stops at the first failed step.
+- Use `scroll_until_visible(query)`, not scroll-and-look loops.
+- After builds, simulations or page loads, use `wait_for_ui_change` instead of polling with screenshots.
+
+## 3. Recovery (in order, then stop)
+
+1. A verdict fails: retry once with `find_visual_element` for the same target.
+2. An unexpected dialog: `dismiss_obstructions`, or `resolve_modal_dialog(button_label=...)` only for a safe label (OK, Close, Got it, Dismiss, No thanks, Not now, Later, Skip). Anything that deletes, discards, overwrites, sends or pays goes to the user.
+3. A second failure: one `take_screenshot(include_image=true)`, then replan or ask the user. Never loop more than twice on one step.
+
+## 4. Safety
+
+- Never call `run_terminal_command` without the user's go-ahead for that command.
+- Never type passwords, keys or payment details; hand those to the user.
+- Stay inside the app the user named; say so before touching another.
+- Stop and ask before anything irreversible: delete, send, publish, purchase, overwrite.
+
+## 5. Report
+
+End with what was done, the verdict and tier of each critical step, anything left for the user, and how many screenshot images were used.

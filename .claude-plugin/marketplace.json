@@ -1,0 +1,14 @@
+{
+  "name": "desktop-control",
+  "owner": {
+    "name": "Mayur Kubavat"
+  },
+  "description": "Local marketplace for the desktop-control skills plugin.",
+  "plugins": [
+    {
+      "name": "desktop-control",
+      "source": "./plugins/desktop-control",
+      "description": "Skills for the desktop-control MCP server."
+    }
+  ]
+}

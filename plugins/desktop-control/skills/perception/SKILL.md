@@ -1,0 +1,33 @@
+---
+name: perception
+description: Choose how to see the screen with desktop-control - accessibility tree, local OCR, local Gemma checks, Set-of-Marks or a screenshot - and look up any tool's exact parameters. Use when deciding how to find or verify something on screen, or when a perception call returns nothing useful.
+---
+
+# Perception with desktop-control
+
+Pick the cheapest source that can answer the question. Each step down costs more tokens or time.
+
+| Need | Tool | Cost | Fails when |
+| --- | --- | --- | --- |
+| Named controls and their boxes | `get_accessibility_tree(app_name_filter=...)` | 0 image tokens, ~0.1-0.6 s | App has no AX (canvas, games, some EDA panes), permission missing |
+| A label you can name | `find_element(query, role)` / `find_and_click(query)` | 0 image tokens | Label is an icon or drawn text |
+| Text and where it is | `read_screen_text(contains=...)` | ~220 ms on Apple Vision, cached repeats under 1 ms | Text is tiny, rotated or inside images |
+| A yes/no about the screen | `ask_screen(question, expected_text=...)` | OCR first; Gemma ~1.2 s warm, ~8 s cold | Question needs reasoning over many items |
+| An unnamed icon | `find_visual_element(description)` | One Gemma call over numbered boxes | No detector box around the target |
+| Layout of a window | `take_screenshot(mode="annotated_som")` | Marks + URI, no image | Very dense UIs (marks overlap) |
+| Appearance itself | `take_screenshot(include_image=true)` | ~1,500 image tokens per window | Never; it is the fallback |
+
+Rules that hold for every rung:
+
+- Gemma names and judges; it never returns coordinates. Clicks use AX boxes, OCR boxes or mark ids.
+- OCR output on a busy window can cost more tokens than the screenshot (3,714 vs 1,533 on the Claude window). Always pass `contains` or a `region`.
+- `ask_screen` returns `answer` (true, false or null), `confidence`, `evidence` and `source` (ocr, gemma or fallback). A null answer means neither OCR nor Gemma could decide; escalate instead of guessing.
+- Electron apps (Claude, VS Code, Slack) expose their full UI in the AX tree after the first inspection; if the tree is only window buttons, call again once.
+
+## References (read when needed)
+
+- `references/tools.md`: every tool with exact parameters and defaults, grouped by toolset. Generated from the server code.
+- `references/gemma-tiers.md`: what the local model does in each tool, its settings and measured latency.
+- `references/zero-token-element-discovery.md`: recipes for finding elements without images.
+- `references/visual-delta-verification.md`: how pixel-delta verification works and when it misleads.
+- `references/architecture.md`: how HAL, perception, vDOM and the agent loop fit together.

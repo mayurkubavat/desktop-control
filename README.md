@@ -218,3 +218,13 @@ All 89 tests cover HAL window management, quiescence monitoring, grounding strat
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Agent skills plugin
+
+`plugins/desktop-control/` is a Claude Code plugin of skills that teach an agent
+to use this server well: a perception ladder that avoids screenshots, verified
+actions, app playbooks (Claude, Chrome, Vivado, Verdi), skill crafting,
+evaluation and troubleshooting. Install it with
+`/plugin marketplace add <path to this repo>` and
+`/plugin install desktop-control@desktop-control`. See
+[plugins/desktop-control/README.md](plugins/desktop-control/README.md).

@@ -3,6 +3,7 @@ Unit and Integration Tests for Dynamic Self-Healing Action Cache (Option 1).
 """
 
 import os
+from typing import Optional
 import tempfile
 import pytest
 import numpy as np

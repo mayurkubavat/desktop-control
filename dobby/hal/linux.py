@@ -72,12 +72,19 @@ class LinuxHAL(IDesktopHAL):
         self._sct = mss.MSS()
         self._is_wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
         self._x_display: Optional[display.Display] = None
-
-        if not self._is_wayland:
+        # Open X whenever DISPLAY is set. Under XWayland both DISPLAY and
+        # WAYLAND_DISPLAY are set and X11 clients are still reachable.
+        if os.environ.get("DISPLAY"):
             try:
                 self._x_display = display.Display()
             except Exception:
                 self._x_display = None
+        if self._x_display is None:
+            self.display_server = "none"
+        elif self._is_wayland:
+            self.display_server = "XWayland"
+        else:
+            self.display_server = "X11"
 
     def _check_failsafe(self, x: int, y: int) -> None:
         """Emergency abort if pointer is directed to top-left (0, 0)."""
@@ -237,95 +244,178 @@ class LinuxHAL(IDesktopHAL):
             time.sleep(0.01)
         time.sleep(CONFIG.action_cooldown_ms / 1000.0)
 
+    # ------------------------------------------------------------ windows
+    #
+    # EWMH (_NET_*) properties set by every mainstream X11 window manager.
+    # Under XWayland only X11 clients are visible; native Wayland windows are not.
+
+    _SKIP_TYPES = (
+        "_NET_WM_WINDOW_TYPE_DOCK",
+        "_NET_WM_WINDOW_TYPE_DESKTOP",
+        "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+        "_NET_WM_WINDOW_TYPE_TOOLTIP",
+    )
+
+    def _atom(self, name: str) -> int:
+        cache = self.__dict__.setdefault("_atoms", {})
+        if name not in cache:
+            cache[name] = self._x_display.intern_atom(name)
+        return cache[name]
+
+    def _prop(self, win: Any, name: str) -> Any:
+        try:
+            p = win.get_full_property(self._atom(name), X.AnyPropertyType)
+        except Exception:
+            return None
+        return p.value if p is not None else None
+
+    def _active_id(self) -> Optional[int]:
+        root = self._x_display.screen().root
+        val = self._prop(root, "_NET_ACTIVE_WINDOW")
+        try:
+            wid = int(val[0]) if val is not None and len(val) else 0
+        except Exception:
+            wid = 0
+        return wid or None
+
+    def _stacked_ids(self) -> List[int]:
+        """Managed windows, front to back (stacking order when the WM provides it)."""
+        root = self._x_display.screen().root
+        stacking = self._prop(root, "_NET_CLIENT_LIST_STACKING")
+        if stacking is not None and len(stacking):
+            return [int(w) for w in reversed(list(stacking))]  # EWMH lists bottom to top
+        clients = self._prop(root, "_NET_CLIENT_LIST")
+        return [int(w) for w in clients] if clients is not None else []
+
+    def _window_info(self, win_id: int, active_id: Optional[int]) -> Optional[WindowInfo]:
+        win = self._x_display.create_resource_object("window", win_id)
+        types = self._prop(win, "_NET_WM_WINDOW_TYPE")
+        if types is not None:
+            skip = {self._atom(t) for t in self._SKIP_TYPES}
+            if any(int(t) in skip for t in types):
+                return None
+        state = self._prop(win, "_NET_WM_STATE")
+        if state is not None and self._atom("_NET_WM_STATE_HIDDEN") in [int(a) for a in state]:
+            return None  # minimised
+        attrs = win.get_attributes()
+        if getattr(attrs, "map_state", X.IsViewable) != X.IsViewable:
+            return None
+
+        name = self._prop(win, "_NET_WM_NAME")
+        if name is None:
+            name = self._prop(win, "WM_NAME")
+        if isinstance(name, bytes):
+            title = name.decode("utf-8", errors="ignore")
+        else:
+            title = str(name) if name is not None else ""
+
+        app_name = None
+        try:
+            wm_class = win.get_wm_class()
+            if wm_class:
+                app_name = wm_class[-1] or wm_class[0]
+        except Exception:
+            pass
+
+        geom = win.get_geometry()
+        root = self._x_display.screen().root
+        coords = root.translate_coords(win, 0, 0)
+        x, y, w, h = int(coords.x), int(coords.y), int(geom.width), int(geom.height)
+        # Include the WM decoration (title bar, borders) so occlusion matches what is drawn.
+        extents = self._prop(win, "_NET_FRAME_EXTENTS")
+        if extents is not None and len(extents) == 4:
+            left, right, top, bottom = (int(v) for v in extents)
+            x, y, w, h = x - left, y - top, w + left + right, h + top + bottom
+        if w < 20 or h < 20:
+            return None
+
+        return WindowInfo(
+            window_id=hex(win_id),
+            title=title or (app_name or "Untitled"),
+            bbox=BoundingBox(x=x, y=y, width=w, height=h),
+            is_active=(win_id == active_id),
+            app_name=app_name,
+        )
+
     def list_windows(self) -> List[WindowInfo]:
-        """Lists active top-level windows using X11 EWMH."""
+        """Visible top-level windows, front to back, docks and minimised windows excluded."""
         if not self._x_display:
             return []
-
         try:
-            root = self._x_display.screen().root
-            net_client_list = self._x_display.intern_atom("_NET_CLIENT_LIST")
-            net_wm_name = self._x_display.intern_atom("_NET_WM_NAME")
-            net_active_win = self._x_display.intern_atom("_NET_ACTIVE_WINDOW")
-            wm_name = self._x_display.intern_atom("WM_NAME")
-
-            client_list = root.get_full_property(net_client_list, X.AnyPropertyType)
-            active_prop = root.get_full_property(net_active_win, X.AnyPropertyType)
-            active_id = active_prop.value[0] if active_prop and active_prop.value else None
-
-            if not client_list:
-                return []
-
+            active_id = self._active_id()
             results: List[WindowInfo] = []
-            for win_id in client_list.value:
+            for win_id in self._stacked_ids():
                 try:
-                    win = self._x_display.create_resource_object("window", win_id)
-                    name_prop = win.get_full_property(net_wm_name, 0) or win.get_full_property(wm_name, 0)
-                    title = name_prop.value.decode("utf-8", errors="ignore") if name_prop else "Untitled"
-                    geom = win.get_geometry()
-                    
-                    # Convert window coordinates to root coordinates
-                    coords = root.translate_coords(win, 0, 0)
-
-                    bbox = BoundingBox(
-                        x=coords.x,
-                        y=coords.y,
-                        width=geom.width,
-                        height=geom.height,
-                    )
-                    
-                    results.append(
-                        WindowInfo(
-                            window_id=hex(win_id),
-                            title=title,
-                            bbox=bbox,
-                            is_active=(win_id == active_id),
-                        )
-                    )
-                except (xlib_error.BadWindow, xlib_error.BadDrawable):
+                    info = self._window_info(win_id, active_id)
+                except (xlib_error.BadWindow, xlib_error.BadDrawable, xlib_error.BadMatch):
                     continue
-
+                if info is not None:
+                    results.append(info)
             return results
         except Exception:
             return []
 
     def get_active_window(self) -> Optional[WindowInfo]:
-        """Returns the currently active / focused window."""
-        windows = self.list_windows()
-        for win in windows:
-            if win.is_active:
-                return win
-        return None
+        """The window named by _NET_ACTIVE_WINDOW, if it is a visible top-level window."""
+        if not self._x_display:
+            return None
+        try:
+            active_id = self._active_id()
+            if active_id is None:
+                return None
+            return self._window_info(active_id, active_id)
+        except Exception:
+            return None
+
+    def window_pid(self, window_id: str) -> Optional[int]:
+        """Owning process id from _NET_WM_PID (set by GTK, Qt, Electron and most toolkits)."""
+        if not self._x_display:
+            return None
+        try:
+            win = self._x_display.create_resource_object("window", _parse_window_id(window_id))
+            val = self._prop(win, "_NET_WM_PID")
+            return int(val[0]) if val is not None and len(val) else None
+        except Exception:
+            return None
 
     def focus_window(self, window_id: str) -> bool:
-        """Focuses target window using _NET_ACTIVE_WINDOW and fallback stack-raising."""
+        """Activates the window via _NET_ACTIVE_WINDOW and reports whether focus actually moved."""
         if not self._x_display:
             return False
-
         try:
-            win_int = int(window_id, 16) if window_id.startswith("0x") else int(window_id)
+            win_int = _parse_window_id(window_id)
             root = self._x_display.screen().root
-            net_active_win = self._x_display.intern_atom("_NET_ACTIVE_WINDOW")
-            
-            # 1. Send EWMH _NET_ACTIVE_WINDOW ClientMessage to root window manager
+            win = self._x_display.create_resource_object("window", win_int)
+            # Source indication 2 = pager/automation: WMs honour it without focus-stealing checks.
             event = protocol_event.ClientMessage(
-                window=win_int,
-                client_type=net_active_win,
-                data=(32, [1, X.CurrentTime, 0, 0, 0]),
+                window=win,
+                client_type=self._atom("_NET_ACTIVE_WINDOW"),
+                data=(32, [2, X.CurrentTime, 0, 0, 0]),
             )
             root.send_event(event, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+            self._x_display.flush()
 
-            # 2. Direct window map and configure fallback in case WM doesn't redirect
-            try:
-                win = self._x_display.create_resource_object("window", win_int)
-                win.map()
-                win.configure(stack_mode=X.Above)
-                self._x_display.set_input_focus(win, X.RevertToParent, X.CurrentTime)
-            except Exception:
-                pass
-
-            self._x_display.sync()
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                if self._active_id() == win_int:
+                    break
+                time.sleep(0.02)
+            else:
+                # No (or a stubborn) window manager: raise and focus directly.
+                try:
+                    win.map()
+                    win.configure(stack_mode=X.Above)
+                    self._x_display.set_input_focus(win, X.RevertToParent, X.CurrentTime)
+                    self._x_display.sync()
+                except Exception:
+                    pass
             time.sleep(CONFIG.action_cooldown_ms / 1000.0)
-            return True
+            active = self._active_id()
+            return active == win_int or active is None
         except Exception:
             return False
+
+
+def _parse_window_id(window_id: str) -> int:
+    s = str(window_id).strip()
+    return int(s, 16) if s.lower().startswith("0x") else int(s)

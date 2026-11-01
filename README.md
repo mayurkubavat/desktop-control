@@ -24,7 +24,7 @@ A Model Context Protocol (MCP) server for desktop automation, screen perception,
 ### Prerequisites
 
 - **Python**: 3.10 or higher
-- **Linux**: X11 or Wayland (with `xwayland` / portal support)
+- **Linux**: an X11 or XWayland session (native Wayland is not supported yet); see [docs/linux.md](docs/linux.md)
 - **Windows**: Windows 10/11 (supported via Win32 / UIA HAL)
 
 ### Setup
@@ -46,6 +46,9 @@ pip install -e ".[ocr]"
 
 # macOS backend (Quartz capture/input, Accessibility tree)
 pip install -e ".[macos,ocr]"
+
+# Linux X11 backend (system packages first: see docs/linux.md)
+pip install -e ".[linux,ocr]"
 ```
 
 On macOS, grant the app that launches the server (Terminal, Claude, Antigravity)

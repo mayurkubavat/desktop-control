@@ -187,6 +187,7 @@ class FakeAX:
     def __init__(self, tree, trusted=True):
         self.tree = tree  # pid -> root element dict
         self.trusted = trusted
+        self.set_calls = []
 
     def AXIsProcessTrusted(self):
         return self.trusted
@@ -201,6 +202,13 @@ class FakeAX:
 
     def AXValueGetValue(self, value, kind, _):
         return True, value
+
+    def AXUIElementSetAttributeValue(self, el, name, value):
+        self.set_calls.append((name, value))
+        if el.get("electron") and name == "AXManualAccessibility":
+            el["AXWindows"] = el.pop("_hidden_windows", [])  # Chromium exposes web content now
+            return 0
+        return -25205  # kAXErrorAttributeUnsupported
 
 
 def _el(role, frame=None, children=(), **attrs):
@@ -265,3 +273,46 @@ def test_factory_picks_mac_hal(monkeypatch):
     hal = factory.get_desktop_hal()
     assert isinstance(hal, MacHAL)
     monkeypatch.setattr(factory, "_HAL_INSTANCE", None)
+
+
+def test_ax_inspector_enables_electron_web_content(monkeypatch):
+    from vision_mcp.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "ax_web_content_settle_seconds", 0)
+    send = _el("AXButton", (200, 300, 60, 24), AXTitle="Send", AXEnabled=True)
+    web = _el("AXWebArea", (0, 30, 1512, 900), children=[send])
+    win = _el("AXWindow", (0, 0, 1512, 982), children=[web], AXTitle="Claude")
+    fake = FakeAX({42: {"electron": True, "_hidden_windows": [win]}})
+    insp = AXInspector(ax=fake, appkit=FakeAppKit(front_pid=42), screen_bounds=(0, 0, 1512, 982))
+    assert [e.name for e in insp.inspect_desktop()] == ["Send"]
+    assert insp.web_content_enabled == {42: True}
+    insp.inspect_desktop()
+    assert fake.set_calls == [("AXManualAccessibility", True)]  # once per pid
+
+
+def test_ax_inspector_native_app_rejects_flag_harmlessly():
+    insp = _inspector()
+    assert {e.name for e in insp.inspect_desktop()} >= {"Save"}
+    assert insp.web_content_enabled == {42: False}
+    insp.inspect_desktop()
+    assert insp._ax.set_calls == [("AXManualAccessibility", True)]
+
+
+def test_ax_inspector_web_content_can_be_disabled(monkeypatch):
+    from vision_mcp.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "ax_enable_web_content", False)
+    insp = _inspector()
+    insp.inspect_desktop()
+    assert insp._ax.set_calls == []
+
+
+def test_ax_inspector_wrapper_groups_do_not_use_depth():
+    leaf = _el("AXButton", (10, 10, 40, 20), AXTitle="Deep")
+    node = leaf
+    for _ in range(30):
+        node = _el("AXGroup", (0, 0, 500, 500), children=[node])
+    win = _el("AXWindow", (0, 0, 800, 600), children=[node], AXTitle="W")
+    insp = AXInspector(ax=FakeAX({42: {"AXWindows": [win]}}), appkit=FakeAppKit(front_pid=42),
+                       screen_bounds=(0, 0, 1512, 982))
+    assert [e.name for e in insp.inspect_desktop(max_depth=4)] == ["Deep"]

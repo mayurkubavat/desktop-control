@@ -114,6 +114,17 @@ class VisionConfig(BaseModel):
         default=True,
         description="Run OCR during capture_vdom: name empty detector boxes and add free text as static_text nodes.",
     )
+    ax_enable_web_content: bool = Field(
+        default=True,
+        description=(
+            "macOS: set AXManualAccessibility on each inspected app once, so Electron/Chromium apps "
+            "(Claude, VS Code, Slack) expose their web content to the AX tree."
+        ),
+    )
+    ax_web_content_settle_seconds: float = Field(
+        default=0.4,
+        description="After first enabling web-content AX on an app, wait this long for Chromium to build its tree.",
+    )
 
     # Local Gemma 3 Multimodal Sidecar Plugin
     enable_gemma3_sidecar: bool = Field(

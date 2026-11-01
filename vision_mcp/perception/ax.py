@@ -55,6 +55,8 @@ AX_ROLE_MAP = {
     "AXList": "list",
 }
 
+PASSTHROUGH_ROLES = {"AXGroup", "AXWebArea", "AXScrollArea", "AXSplitGroup", "AXLayoutArea"}
+
 DIALOG_SUBROLES = {"AXDialog", "AXSystemDialog", "AXFloatingWindow"}
 
 
@@ -75,6 +77,8 @@ class AXInspector:
         self._ax = ax
         self._appkit = appkit
         self.error: Optional[str] = None
+        # pid -> True if AXManualAccessibility was accepted, False if the app refused it
+        self.web_content_enabled: dict = {}
         if self._ax is None:
             try:
                 import ApplicationServices  # type: ignore
@@ -124,6 +128,31 @@ class AXInspector:
             return None
         return int(p.x), int(p.y), int(s.width), int(s.height)
 
+    def _enable_web_content(self, root, pid: int) -> bool:
+        """
+        Electron and Chromium build their web-content AX tree only after a client
+        sets AXManualAccessibility on the app element. Native apps reject the
+        attribute (kAXErrorAttributeUnsupported), which is harmless. Tried once
+        per pid. AXEnhancedUserInterface is deliberately not used: it breaks
+        window animations and positioning in some apps.
+
+        Returns True the first time it succeeds, so the caller can let the tree settle.
+        """
+        if not CONFIG.ax_enable_web_content or pid in self.web_content_enabled:
+            return False
+        setter = getattr(self._ax, "AXUIElementSetAttributeValue", None)
+        if setter is None:
+            self.web_content_enabled[pid] = False
+            return False
+        try:
+            err = setter(root, "AXManualAccessibility", True)
+        except Exception as e:
+            logger.debug(f"AXManualAccessibility on pid {pid} failed: {e}")
+            err = -1
+        ok = err == 0
+        self.web_content_enabled[pid] = ok
+        return ok
+
     def _apps(self, app_name_filter: Optional[str]):
         ws = self._appkit.NSWorkspace.sharedWorkspace()
         if not app_name_filter:
@@ -150,10 +179,19 @@ class AXInspector:
             screen = self._main_screen()
 
         elements: List[UIElement] = []
-        deadline = time.monotonic() + self.max_seconds
         budget = [self.max_nodes]
+        apps = []
+        settle = False
         for app in self._apps(app_name_filter):
-            root = self._ax.AXUIElementCreateApplication(int(app.processIdentifier()))
+            pid = int(app.processIdentifier())
+            root = self._ax.AXUIElementCreateApplication(pid)
+            settle = self._enable_web_content(root, pid) or settle
+            apps.append(root)
+        if settle and CONFIG.ax_web_content_settle_seconds > 0:
+            time.sleep(CONFIG.ax_web_content_settle_seconds)
+
+        deadline = time.monotonic() + self.max_seconds
+        for root in apps:
             for win in self._attr(root, "AXWindows") or []:
                 self._walk(win, 1, max_depth, filter_interactable, elements, deadline, budget, screen, parent_role="")
                 if len(elements) >= CONFIG.som_max_elements or time.monotonic() > deadline:
@@ -221,8 +259,11 @@ class AXInspector:
                     )
         if not visible:
             return  # off-screen subtree
+        # Chromium nests web content in many unnamed AXGroup wrappers (one per <div>).
+        # They do not count toward max_depth; the node budget and deadline still bound the walk.
+        next_depth = depth if ax_role in PASSTHROUGH_ROLES and not subrole else depth + 1
         for child in self._attr(el, "AXChildren") or []:
-            self._walk(child, depth + 1, max_depth, filter_interactable, out, deadline, budget, screen, ax_role)
+            self._walk(child, next_depth, max_depth, filter_interactable, out, deadline, budget, screen, ax_role)
 
 
 def get_accessibility_inspector():

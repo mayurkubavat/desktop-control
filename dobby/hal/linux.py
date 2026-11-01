@@ -337,6 +337,40 @@ class LinuxHAL(IDesktopHAL):
             app_name=app_name,
         )
 
+    def client_windows(self) -> List[dict]:
+        """Front-to-back client areas (no WM frame) with pid and title.
+
+        The AT-SPI inspector uses these to place GTK 4 widgets, which only
+        report window-relative coordinates.
+        """
+        if not self._x_display:
+            return []
+        out: List[dict] = []
+        try:
+            root = self._x_display.screen().root
+            for win_id in self._stacked_ids():
+                try:
+                    win = self._x_display.create_resource_object("window", win_id)
+                    geom = win.get_geometry()
+                    coords = root.translate_coords(win, 0, 0)
+                    pid = self._prop(win, "_NET_WM_PID")
+                    name = self._prop(win, "_NET_WM_NAME")
+                    if name is None:
+                        name = self._prop(win, "WM_NAME")
+                    title = name.decode("utf-8", "ignore") if isinstance(name, bytes) else str(name or "")
+                    out.append({
+                        "window_id": hex(win_id),
+                        "pid": int(pid[0]) if pid is not None and len(pid) else None,
+                        "title": title,
+                        "x": int(coords.x), "y": int(coords.y),
+                        "width": int(geom.width), "height": int(geom.height),
+                    })
+                except (xlib_error.BadWindow, xlib_error.BadDrawable, xlib_error.BadMatch):
+                    continue
+        except Exception:
+            return out
+        return out
+
     def list_windows(self) -> List[WindowInfo]:
         """Visible top-level windows, front to back, docks and minimised windows excluded."""
         if not self._x_display:

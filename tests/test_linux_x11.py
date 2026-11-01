@@ -109,3 +109,77 @@ def test_window_disappears_after_close(hal, spawn):
 
 def test_focus_unknown_window_fails(hal):
     assert hal.focus_window("0x7ffffff0") is False
+
+
+# ---------------------------------------------------------------- AT-SPI
+
+@pytest.fixture(scope="module")
+def inspector(hal):
+    from dobby.perception.atspi import ATSPIInspector
+
+    insp = ATSPIInspector(hal=hal)
+    if not insp.is_available:
+        pytest.skip(f"AT-SPI unavailable: {insp.error}")
+    return insp
+
+
+def test_atspi_places_gtk4_widgets_on_screen(hal, inspector, spawn):
+    """GTK 4 reports SCREEN extents as 0,0; boxes must still land inside the window."""
+    win, _ = spawn("--entry")
+    hal.focus_window(win.window_id)
+    els = _wait_for(lambda: [e for e in inspector.inspect_desktop() if e.name in ("OK", "Cancel")])
+    assert els, "no buttons found"
+    slack = 8  # GTK draws button boxes a few pixels into the window edge
+    for e in els:
+        b = e.bbox
+        assert win.bbox.x <= b.x and b.x + b.width <= win.bbox.x + win.bbox.width + slack
+        assert win.bbox.y <= b.y and b.y + b.height <= win.bbox.y + win.bbox.height + slack
+
+
+def test_atspi_defaults_to_active_app(hal, inspector, spawn):
+    a, _ = spawn("--entry")
+    b, _ = spawn("--info")
+    hal.focus_window(b.window_id)
+    time.sleep(0.3)
+    roles = {e.role for e in inspector.inspect_desktop()}
+    assert "text" not in roles  # the --entry dialog belongs to another (inactive) process
+
+
+def test_atspi_hit_test_finds_button(hal, inspector, spawn):
+    win, _ = spawn("--entry")
+    hal.focus_window(win.window_id)
+    ok = _wait_for(lambda: next((e for e in inspector.inspect_desktop() if e.name == "OK"), None))
+    assert ok is not None
+    hit = inspector.hit_test(ok.bbox.x + ok.bbox.width // 2, ok.bbox.y + ok.bbox.height // 2)
+    assert hit is not None and hit["name"] == "OK"
+
+
+def test_atspi_hit_test_reports_covering_window(hal, inspector, spawn):
+    """The topmost window at a point answers, even when it is not the app being inspected."""
+    below, _ = spawn("--entry")
+    above, _ = spawn("--info")
+    hal.focus_window(above.window_id)
+    time.sleep(0.3)
+    ab = above.bbox
+    # A point inside the front window: the hit must come from inside its box.
+    hit = inspector.hit_test(ab.x + ab.width // 2, ab.y + ab.height // 2)
+    assert hit is not None
+    hb = hit["bbox"]
+    assert ab.x <= hb["x"] and hb["x"] + hb["width"] <= ab.x + ab.width + 8
+
+
+def test_atspi_without_bus_does_not_abort():
+    """libatspi aborts the process when the a11y bus is missing; the probe must prevent that."""
+    code = (
+        "from dobby.perception.atspi import ATSPIInspector\n"
+        "i = ATSPIInspector(hal=object())\n"
+        "print('available', i.is_available)\n"
+        "print(len(i.inspect_desktop()), i.hit_test(10, 10))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ("DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS")}
+    env["XDG_RUNTIME_DIR"] = "/nonexistent"
+    env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent/bus"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert "available False" in out.stdout
+    assert "0 None" in out.stdout

@@ -243,7 +243,13 @@ def test_confirmation_no_downgrades_act_to_escalate():
     assert out2["gate"]["verdict"] == "act" and out2["confirmation"] is None
 
 
-def test_menu_bar_items_survive_window_clipping():
+def test_menu_bar_items_survive_window_clipping(monkeypatch):
+    import dobby.screen_state.observe as obs_mod
+    import dobby.screen_state.state as state_mod
+
+    # macOS behaviour: the app's menu bar sits at the top of the screen, outside its window.
+    monkeypatch.setattr(obs_mod, "MENU_BAR_HEIGHT", 40)
+    monkeypatch.setattr(state_mod, "MENU_BAR_HEIGHT", 40)
     win = WindowInfo(window_id="1", title="Notes", bbox=BoundingBox(x=0, y=30, width=900, height=600),
                      is_active=True, app_name="Notes")
     ctl = FakeController([[node("menu item", "File", 60, 2, 40, 22), node("push button", "OK", 10, 100),
@@ -252,3 +258,20 @@ def test_menu_bar_items_survive_window_clipping():
     s = observe(ctl, StateTracker())
     labels = {e.label: e for e in s.elements}
     assert set(labels) == {"File", "OK"} and labels["File"].position == "menu bar"
+
+
+def test_no_screen_top_menu_band_off_macos(monkeypatch):
+    import dobby.screen_state.observe as obs_mod
+    import dobby.screen_state.state as state_mod
+
+    # Linux/Windows: menus live inside the window, so nothing above it is kept.
+    monkeypatch.setattr(obs_mod, "MENU_BAR_HEIGHT", 0)
+    monkeypatch.setattr(state_mod, "MENU_BAR_HEIGHT", 0)
+    win = WindowInfo(window_id="1", title="gedit", bbox=BoundingBox(x=0, y=30, width=900, height=600),
+                     is_active=True, app_name="gedit")
+    ctl = FakeController([[node("menu item", "Activities", 60, 2, 40, 22), node("menu", "File", 10, 40, 40, 22),
+                           node("push button", "OK", 10, 100)]])
+    ctl.hal.get_active_window = lambda: win
+    s = observe(ctl, StateTracker())
+    labels = {e.label: e for e in s.elements}
+    assert set(labels) == {"File", "OK"} and labels["File"].position != "menu bar"

@@ -1,8 +1,38 @@
-"""AT-SPI2 Linux Accessibility Tree Inspector."""
+"""
+AT-SPI2 accessibility inspector for Linux (X11 and XWayland).
 
-from typing import List, Optional, Set
-from dobby.types import UIElement, BoundingBox
+Same interface as the macOS ``AXInspector``: ``is_available``,
+``inspect_desktop``, ``inspect`` and ``hit_test``. Role names are AT-SPI's own,
+which the rest of Dobby already uses.
+
+Things this handles that a naive walk does not:
+
+* No accessibility bus: libatspi aborts the whole process (g_error) when it
+  cannot reach the bus, so the bus is probed over D-Bus first and the
+  inspector reports itself unavailable instead.
+* GTK 4 cannot know where its window is on screen and reports every SCREEN
+  extent as (0, 0). Its WINDOW extents are right, so those widgets are placed
+  with the window's client origin taken from the X server.
+* Hidden widgets report a -2147483648 sentinel; they are skipped, as are
+  subtrees that are not SHOWING.
+* Walks are bounded by a node budget and a deadline, like the macOS walk.
+* Chromium and Electron only build their accessibility tree when assistive
+  technology is announced on the bus (org.a11y.Status.IsEnabled), the Linux
+  counterpart of macOS AXManualAccessibility. Apps started before that flag
+  was set need a restart, or ``--force-renderer-accessibility``.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 from dobby.config import CONFIG
+from dobby.types import BoundingBox, UIElement
+
+logger = logging.getLogger(__name__)
 
 INTERACTABLE_ROLES: Set[str] = {
     "push button",
@@ -10,6 +40,7 @@ INTERACTABLE_ROLES: Set[str] = {
     "toggle button",
     "check box",
     "radio button",
+    "menu",
     "menu item",
     "check menu item",
     "radio menu item",
@@ -30,29 +61,222 @@ INTERACTABLE_ROLES: Set[str] = {
     "terminal",
 }
 
+# Roles that are only containers: a hit test that lands on one keeps looking deeper.
+CONTAINER_ROLES: Set[str] = {
+    "application", "frame", "window", "dialog", "panel", "filler", "scroll pane",
+    "viewport", "layered pane", "root pane", "split pane", "section", "grouping",
+    "unknown", "redundant object", "document frame", "document web", "internal frame",
+}
+
+_SENTINEL = -(2 ** 31)
+_MAX_COORD = 1 << 15
+
+
+def a11y_bus_reachable(timeout_ms: int = 500) -> Tuple[bool, str]:
+    """Probes the accessibility bus without touching libatspi (which aborts when it is missing)."""
+    if os.environ.get("AT_SPI_BUS_ADDRESS"):
+        return True, ""
+    if not os.environ.get("DBUS_SESSION_BUS_ADDRESS") and not os.environ.get("XDG_RUNTIME_DIR"):
+        return False, "no session D-Bus (DBUS_SESSION_BUS_ADDRESS unset)"
+    try:
+        from gi.repository import Gio, GLib
+
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync(
+            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+            None, GLib.VariantType.new("(s)"), Gio.DBusCallFlags.NONE, timeout_ms, None,
+        )
+        address = reply.unpack()[0] if reply is not None else ""
+        return (bool(address), "" if address else "org.a11y.Bus returned no address")
+    except Exception as e:
+        return False, f"accessibility bus unreachable: {e}"
+
+
+def announce_assistive_technology(timeout_ms: int = 500) -> bool:
+    """Sets org.a11y.Status.IsEnabled so Chromium/Electron apps build their tree."""
+    try:
+        from gi.repository import Gio, GLib
+
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        bus.call_sync(
+            "org.a11y.Bus", "/org/a11y/bus", "org.freedesktop.DBus.Properties", "Set",
+            GLib.Variant("(ssv)", ("org.a11y.Status", "IsEnabled", GLib.Variant("b", True))),
+            None, Gio.DBusCallFlags.NONE, timeout_ms, None,
+        )
+        return True
+    except Exception as e:
+        logger.debug("could not set org.a11y.Status.IsEnabled: %s", e)
+        return False
+
+
+def _valid(x: int, y: int, w: int, h: int) -> bool:
+    return (
+        x != _SENTINEL and y != _SENTINEL
+        and -_MAX_COORD < x < _MAX_COORD and -_MAX_COORD < y < _MAX_COORD
+        and 0 < w < _MAX_COORD and 0 < h < _MAX_COORD
+    )
+
 
 class ATSPIInspector:
-    """Queries Linux D-Bus AT-SPI2 registry to extract semantic UI components and bounding boxes."""
+    """Walks the AT-SPI tree of the active app (or apps matching a filter)."""
 
-    def __init__(self) -> None:
-        self._available = False
-        self._atspi = None
+    def __init__(
+        self,
+        atspi: Any = None,
+        hal: Any = None,
+        max_nodes: int = 4000,
+        max_seconds: float = 0.8,
+        probe_bus: bool = True,
+    ) -> None:
+        self.max_nodes = max_nodes
+        self.max_seconds = max_seconds
+        self.error: Optional[str] = None
+        self.web_content_announced = False
+        self._hal = hal
+        self._atspi = atspi
         self._coord_type = None
+        self._available = False
 
-        try:
-            import gi
-            gi.require_version("Atspi", "2.0")
-            from gi.repository import Atspi
-            self._atspi = Atspi
-            self._coord_type = Atspi.CoordType.SCREEN
-            self._available = True
-        except Exception:
-            self._available = False
+        if self._atspi is None:
+            try:
+                import gi
+
+                gi.require_version("Atspi", "2.0")
+                from gi.repository import Atspi
+
+                self._atspi = Atspi
+            except Exception as e:
+                self.error = f"{type(e).__name__}: {e} (install python3-gi and gir1.2-atspi-2.0)"
+                return
+        if probe_bus:
+            ok, why = a11y_bus_reachable()
+            if not ok:
+                self.error = why
+                self._atspi = None
+                return
+        self._coord_type = self._atspi.CoordType.SCREEN
+        self._available = True
 
     @property
     def is_available(self) -> bool:
-        """Returns True if PyGObject Atspi is present and functional."""
+        """True when PyGObject Atspi loaded and the accessibility bus answered."""
         return self._available
+
+    # ------------------------------------------------------------- helpers
+
+    def _get_hal(self) -> Any:
+        if self._hal is None:
+            from dobby.hal.factory import get_desktop_hal
+
+            self._hal = get_desktop_hal()
+        return self._hal
+
+    def _client_windows(self) -> List[Dict[str, Any]]:
+        try:
+            fn = getattr(self._get_hal(), "client_windows", None)
+            return list(fn()) if callable(fn) else []
+        except Exception:
+            return []
+
+    def _active_pid(self) -> Optional[int]:
+        try:
+            hal = self._get_hal()
+            win = hal.get_active_window()
+            pid_fn = getattr(hal, "window_pid", None)
+            if win is None or not callable(pid_fn):
+                return None
+            return pid_fn(win.window_id)
+        except Exception:
+            return None
+
+    def _announce(self) -> None:
+        if CONFIG.ax_enable_web_content and not self.web_content_announced:
+            self.web_content_announced = announce_assistive_technology()
+
+    def _apps(self, app_name_filter: Optional[str]) -> List[Any]:
+        desktop = self._atspi.get_desktop(0)
+        apps = []
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app is not None:
+                apps.append(app)
+        if app_name_filter:
+            needle = app_name_filter.lower()
+            picked = []
+            for app in apps:
+                if needle in (app.get_name() or "").lower():
+                    picked.append(app)
+                    continue
+                for w in range(app.get_child_count()):
+                    child = app.get_child_at_index(w)
+                    if child is not None and needle in (child.get_name() or "").lower():
+                        picked.append(app)
+                        break
+            return picked
+        pid = self._active_pid()
+        if pid is not None:
+            front = [a for a in apps if _safe(lambda: a.get_process_id()) == pid]
+            if front:
+                return front
+        return apps
+
+    def _origin_for(self, app: Any, win: Any, clients: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
+        """Client-area origin of ``win`` when its SCREEN extents are unusable (GTK 4)."""
+        comp = win.get_component_iface()
+        if comp is None:
+            return None
+        ext = comp.get_extents(self._atspi.CoordType.SCREEN)
+        if (ext.x, ext.y) != (0, 0):
+            return None  # toolkit knows its screen position
+        pid = _safe(lambda: app.get_process_id())
+        title = (win.get_name() or "").strip().lower()
+        candidates = [c for c in clients if pid is not None and c.get("pid") == pid] or clients
+        best = None
+        for c in candidates:
+            ct = (c.get("title") or "").strip().lower()
+            if title and ct and (ct == title or title in ct or ct in title):
+                if (c["width"], c["height"]) == (ext.width, ext.height):
+                    return (c["x"], c["y"])
+                best = best or (c["x"], c["y"])
+        if best is not None:
+            return best
+        same_pid = [c for c in candidates if pid is not None and c.get("pid") == pid]
+        if len(same_pid) == 1:
+            return (same_pid[0]["x"], same_pid[0]["y"])
+        return None
+
+    def _extents(self, comp: Any, origin: Optional[Tuple[int, int]]) -> Optional[Tuple[int, int, int, int]]:
+        try:
+            if origin is None:
+                r = comp.get_extents(self._coord_type)
+                x, y = r.x, r.y
+            else:
+                r = comp.get_extents(self._atspi.CoordType.WINDOW)
+                x, y = origin[0] + r.x, origin[1] + r.y
+            if r.x == _SENTINEL or r.y == _SENTINEL:
+                return None
+            box = (int(x), int(y), int(r.width), int(r.height))
+        except Exception:
+            return None
+        return box if _valid(*box) else None
+
+    def _showing(self, node: Any) -> bool:
+        try:
+            states = node.get_state_set()
+            return states.contains(self._atspi.StateType.SHOWING)
+        except Exception:
+            return True
+
+    def _toplevels(self, apps: List[Any]):
+        clients = self._client_windows()
+        for app in apps:
+            for w in range(app.get_child_count()):
+                win = app.get_child_at_index(w)
+                if win is None or not self._showing(win):
+                    continue
+                yield app, win, self._origin_for(app, win, clients)
+
+    # -------------------------------------------------------------- public
 
     def inspect_desktop(
         self,
@@ -61,151 +285,152 @@ class ATSPIInspector:
         filter_interactable: bool = True,
     ) -> List[UIElement]:
         """
-        Traverses the AT-SPI desktop hierarchy and returns flattened list of UI elements.
-
-        Args:
-            app_name_filter: Optional substring to filter matching application names or window titles.
-            max_depth: Maximum recursion depth.
-            filter_interactable: If True, only returns clickable or typable elements.
-
-        Returns:
-            List of UIElement models with true screen bounding boxes.
+        Flattened, on-screen elements of the active app (or apps matching
+        ``app_name_filter``), with true screen bounding boxes.
         """
-        if not self._available or not self._atspi:
+        if not self._available:
             return []
-
+        self._announce()
         elements: List[UIElement] = []
-
+        budget = [self.max_nodes]
+        deadline = time.monotonic() + self.max_seconds
         try:
-            desktop = self._atspi.get_desktop(0)
-            app_count = desktop.get_child_count()
-
-            for i in range(app_count):
-                app = desktop.get_child_at_index(i)
-                if not app:
-                    continue
-
-                app_name = app.get_name() or ""
-                
-                # Check if app matches filter or has matching window
-                matched = True
-                if app_name_filter:
-                    matched = app_name_filter.lower() in app_name.lower()
-                    if not matched:
-                        # Check window titles
-                        for w_idx in range(app.get_child_count()):
-                            w_child = app.get_child_at_index(w_idx)
-                            if w_child and app_name_filter.lower() in (w_child.get_name() or "").lower():
-                                matched = True
-                                break
-
-                if not matched:
-                    continue
-
-                # Traverse top-level frames/windows
-                for w_idx in range(app.get_child_count()):
-                    win_node = app.get_child_at_index(w_idx)
-                    if not win_node:
-                        continue
-
-                    # Obtain window screen extents for offset fallback
-                    win_x, win_y = 0, 0
-                    win_comp = win_node.get_component_iface()
-                    if win_comp:
-                        w_ext = win_comp.get_extents(self._coord_type)
-                        win_x, win_y = w_ext.x, w_ext.y
-
-                    # If AT-SPI reports window top-level at 0,0, cross-reference X11 window position
-                    if win_x == 0 and win_y == 0:
-                        try:
-                            from dobby.hal.factory import get_desktop_hal
-                            hal_wins = get_desktop_hal().list_windows()
-                            w_title = (win_node.get_name() or "").lower()
-                            for hw in hal_wins:
-                                if w_title and (w_title in hw.title.lower() or hw.title.lower() in w_title):
-                                    win_x, win_y = hw.bbox.x, hw.bbox.y
-                                    break
-                        except Exception:
-                            pass
-
-                    self._traverse_node(
-                        node=win_node,
-                        depth=1,
-                        max_depth=max_depth,
-                        filter_interactable=filter_interactable,
-                        elements=elements,
-                        win_offset=(win_x, win_y),
-                    )
-
-                if len(elements) >= CONFIG.som_max_elements:
+            for _app, win, origin in self._toplevels(self._apps(app_name_filter)):
+                self._walk(win, 1, max_depth, filter_interactable, elements, origin, budget, deadline)
+                if len(elements) >= CONFIG.som_max_elements or budget[0] <= 0 or time.monotonic() > deadline:
                     break
-
-        except Exception:
-            pass
-
-        return elements[:CONFIG.som_max_elements]
+        except Exception as e:
+            logger.debug("AT-SPI walk failed: %s", e)
+        return elements[: CONFIG.som_max_elements]
 
     def inspect(self) -> List[UIElement]:
         """All elements, interactable or not (used by post-condition checks)."""
         return self.inspect_desktop(filter_interactable=False)
 
-    def _traverse_node(
+    def hit_test(self, x: int, y: int) -> Optional[dict]:
+        """The deepest element at screen point (x, y) as ``{"role", "name", "bbox"}``, or None.
+
+        Like the macOS hit test this answers for whatever window is on top at
+        the point, not only the active app: the topmost X11 window there picks
+        the app, and its accessibility tree is searched.
+        """
+        if not self._available:
+            return None
+        try:
+            apps = self._apps_at(x, y)
+            for app, win, origin in self._toplevels(apps):
+                comp = win.get_component_iface()
+                box = self._extents(comp, origin) if comp is not None else None
+                if box is None or not (box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3]):
+                    continue
+                return self._deepest_at(win, x, y, origin) or self._describe(win, box)
+        except Exception as e:
+            logger.debug("AT-SPI hit test failed: %s", e)
+        return None
+
+    def _apps_at(self, x: int, y: int) -> List[Any]:
+        for c in self._client_windows():  # front to back
+            if c["x"] <= x < c["x"] + c["width"] and c["y"] <= y < c["y"] + c["height"]:
+                pid = c.get("pid")
+                if pid is None:
+                    break
+                desktop = self._atspi.get_desktop(0)
+                apps = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+                hits = [a for a in apps if a is not None and _safe(lambda: a.get_process_id()) == pid]
+                if hits:
+                    return hits
+                break
+        return self._apps(None)
+
+    # ------------------------------------------------------------- walking
+
+    def _describe(self, node: Any, box: Tuple[int, int, int, int]) -> dict:
+        return {
+            "role": node.get_role_name() or "unknown",
+            "name": (node.get_name() or "").strip()[:120],
+            "bbox": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]},
+        }
+
+    def _deepest_at(self, win: Any, x: int, y: int, origin: Optional[Tuple[int, int]]) -> Optional[dict]:
+        """Smallest showing element containing the point, searched under ``win`` within the budget.
+
+        A tree search rather than Component.get_accessible_at_point, which GTK 4
+        answers only one level deep.
+        """
+        best: Optional[Tuple[int, dict]] = None
+        best_leaf: Optional[Tuple[int, dict]] = None
+        budget = [self.max_nodes]
+        deadline = time.monotonic() + self.max_seconds
+        stack = [win]
+        while stack and budget[0] > 0 and time.monotonic() < deadline:
+            node = stack.pop()
+            budget[0] -= 1
+            comp = node.get_component_iface()
+            box = self._extents(comp, origin) if comp is not None else None
+            if box is None or not (box[0] <= x < box[0] + box[2] and box[1] <= y < box[1] + box[3]):
+                if node is not win:
+                    continue
+            if box is not None and node is not win:
+                area = box[2] * box[3]
+                desc = self._describe(node, box)
+                if desc["role"] not in CONTAINER_ROLES:
+                    if best_leaf is None or area < best_leaf[0]:
+                        best_leaf = (area, desc)
+                elif best is None or area < best[0]:
+                    best = (area, desc)
+            for c in range(node.get_child_count()):
+                child = node.get_child_at_index(c)
+                if child is not None and self._showing(child):
+                    stack.append(child)
+        pick = best_leaf or best
+        return pick[1] if pick else None
+
+    def _walk(
         self,
-        node,
+        node: Any,
         depth: int,
         max_depth: int,
         filter_interactable: bool,
         elements: List[UIElement],
-        win_offset: tuple[int, int] = (0, 0),
+        origin: Optional[Tuple[int, int]],
+        budget: List[int],
+        deadline: float,
     ) -> None:
         if depth > max_depth or len(elements) >= CONFIG.som_max_elements:
             return
-
+        if budget[0] <= 0 or time.monotonic() > deadline:
+            return
+        budget[0] -= 1
         try:
             role = node.get_role_name() or "unknown"
             name = node.get_name() or ""
             is_interactable = role.lower() in INTERACTABLE_ROLES
-
-            # Extract screen extents
             comp = node.get_component_iface()
-            if comp:
-                rect = comp.get_extents(self._coord_type)
-                w, h = rect.width, rect.height
-                x, y = rect.x, rect.y
-
-                # If screen coordinates are 0,0 and we have a window offset, try WINDOW coordinates
-                if x == 0 and y == 0 and (win_offset[0] != 0 or win_offset[1] != 0):
-                    w_rect = comp.get_extents(self._atspi.CoordType.WINDOW)
-                    x = win_offset[0] + w_rect.x
-                    y = win_offset[1] + w_rect.y
-
-                # Check validity of geometry (skip collapsed dropdown items)
-                area = w * h
-                is_collapsed_menu = (role.lower() == "menu item" and h <= 14)
-                if w > 8 and h > 8 and area >= CONFIG.som_min_element_area and not is_collapsed_menu:
-                    # Filter condition
+            box = self._extents(comp, origin) if comp is not None else None
+            if box is not None:
+                x, y, w, h = box
+                is_collapsed_menu = role.lower() == "menu item" and h <= 14
+                if w > 8 and h > 8 and w * h >= CONFIG.som_min_element_area and not is_collapsed_menu:
                     if not filter_interactable or is_interactable:
-                        element = UIElement(
-                            id=len(elements) + 1,
-                            role=role,
-                            name=name.strip(),
-                            bbox=BoundingBox(x=x, y=y, width=w, height=h),
-                            interactable=is_interactable,
+                        elements.append(
+                            UIElement(
+                                id=len(elements) + 1,
+                                role=role,
+                                name=name.strip(),
+                                bbox=BoundingBox(x=x, y=y, width=w, height=h),
+                                interactable=is_interactable,
+                            )
                         )
-                        elements.append(element)
-
-            # Recurse children
-            child_count = node.get_child_count()
-            for c in range(child_count):
+            for c in range(node.get_child_count()):
                 child = node.get_child_at_index(c)
-                if child:
-                    self._traverse_node(
-                        node=child,
-                        depth=depth + 1,
-                        max_depth=max_depth,
-                        filter_interactable=filter_interactable,
-                        elements=elements,
-                        win_offset=win_offset,
-                    )
+                if child is not None and self._showing(child):
+                    self._walk(child, depth + 1, max_depth, filter_interactable, elements, origin, budget, deadline)
         except Exception:
             return
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception:
+        return None

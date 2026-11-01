@@ -9,6 +9,8 @@ it to the live HAL, AX inspector and OCR engine.
 
 from __future__ import annotations
 
+import sys
+
 import re
 import threading
 import time
@@ -18,7 +20,9 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # AT-SPI role names (the AX inspector maps macOS roles onto these).
 EDITABLE_ROLES = {"entry", "text", "combo box", "spin button", "password text", "search field", "editbar"}
 SECURE_ROLES = {"password text"}
-MENU_BAR_HEIGHT = 40  # macOS menu bar band (points from the top of the main screen)
+# macOS menu bar band (points from the top of the main screen). Linux and Windows
+# menus live inside the window, so there is no band to treat specially.
+MENU_BAR_HEIGHT = 40 if sys.platform == "darwin" else 0
 CLICKABLE_ROLES = {
     "push button", "toggle button", "check box", "radio button", "menu item", "link", "page tab",
     "combo box", "list item", "table cell", "entry", "text", "slider", "spin button", "password text", "icon",

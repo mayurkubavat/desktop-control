@@ -117,7 +117,8 @@ class VisionConfig(BaseModel):
     ax_enable_web_content: bool = Field(
         default=True,
         description=(
-            "macOS: set AXManualAccessibility on each inspected app once, so Electron/Chromium apps "
+            "macOS: set AXManualAccessibility on each inspected app once; Linux: set org.a11y.Status.IsEnabled. "
+            "Either way Electron/Chromium apps "
             "(Claude, VS Code, Slack) expose their web content to the AX tree."
         ),
     )

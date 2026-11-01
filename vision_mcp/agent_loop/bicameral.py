@@ -92,8 +92,12 @@ class BicameralStepController:
         local_gemma_client: Optional[Any] = None,
         cloud_vlm_client: Optional[Any] = None,
         min_local_confidence: float = 0.82,
+        text_reader: Optional[Any] = None,
     ) -> None:
         self.hal = hal
+        # read_screen_text(contains=...) -> {"available", "count", ...}. The controller passes
+        # its local OCR lane; the replay HAL provides its own.
+        self.text_reader = text_reader or getattr(hal, "read_screen_text", None)
         self.local_gemma = local_gemma_client
         self.cloud_vlm = cloud_vlm_client
         self.min_local_confidence = min_local_confidence
@@ -128,6 +132,22 @@ class BicameralStepController:
         if expected.get("contract_failed"):
             return "post-condition contract failed after local retry"
         return None
+
+    def _read_text(self, target: str) -> Optional[Dict[str, Any]]:
+        """OCR result for ``target``, or None when OCR is missing or failed.
+
+        None never counts as "text absent": an unavailable engine must not pass an
+        assert_screen_text_not_present check.
+        """
+        if self.text_reader is None:
+            return None
+        try:
+            res = self.text_reader(contains=target)
+        except Exception:
+            return None
+        if not isinstance(res, dict) or res.get("available") is False or "count" not in res:
+            return None
+        return res
 
     def dispatch_hal_action(self, action_name: str, args: Dict[str, Any]) -> Any:
         """Dispatches an action to the underlying HAL."""
@@ -185,8 +205,8 @@ class BicameralStepController:
         # 2. Tier 0: Deterministic Post-Check (<20ms, 0 tokens)
         if "assert_screen_text" in expected_outcome:
             target = expected_outcome["assert_screen_text"]
-            if hasattr(self.hal, "read_screen_text"):
-                ocr_res = self.hal.read_screen_text(contains=target)
+            ocr_res = self._read_text(target)
+            if ocr_res is not None:
                 if ocr_res.get("count", 0) > 0:
                     return StepExecutionVerdict(
                         success=True,
@@ -199,8 +219,8 @@ class BicameralStepController:
 
         if "assert_screen_text_not_present" in expected_outcome:
             target = expected_outcome["assert_screen_text_not_present"]
-            if hasattr(self.hal, "read_screen_text"):
-                ocr_res = self.hal.read_screen_text(contains=target)
+            ocr_res = self._read_text(target)
+            if ocr_res is not None:
                 if ocr_res.get("count", 0) == 0:
                     return StepExecutionVerdict(
                         success=True,

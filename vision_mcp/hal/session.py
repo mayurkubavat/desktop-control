@@ -44,6 +44,12 @@ class DesktopSession(IDesktopHAL):
         self.quiescence = quiescence
         self.topology = topology
 
+    def __getattr__(self, name: str) -> Any:
+        """Backend-specific attributes (display_server, backing_scale, ...) pass through."""
+        if name == "backend":
+            raise AttributeError(name)
+        return getattr(self.backend, name)
+
     def get_screen_size(self) -> Tuple[int, int]:
         return self.backend.get_screen_size()
 

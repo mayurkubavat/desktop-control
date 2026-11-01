@@ -35,15 +35,30 @@ def _notify_tools_changed() -> None:
     """Records notifications/tools/list_changed and forwards it when a session exists."""
     _TOOL_LIST_NOTIFICATIONS.append("notifications/tools/list_changed")
     session = getattr(mcp_server, "active_session", None)
-    if session is not None and hasattr(session, "send_tool_list_changed"):
-        return session.send_tool_list_changed()
-    return None
+    if session is None or not hasattr(session, "send_tool_list_changed"):
+        return None
+    loop = getattr(mcp_server, "active_loop", None)
+    # Sync tools run in a worker thread. The session's streams belong to the server's
+    # event loop, so the notification must be scheduled there, not in a new loop.
+    if loop is not None and loop.is_running():
+        import asyncio
+
+        try:
+            if asyncio.get_running_loop() is loop:
+                loop.create_task(session.send_tool_list_changed())
+                return None
+        except RuntimeError:
+            pass
+        asyncio.run_coroutine_threadsafe(session.send_tool_list_changed(), loop)
+        return None
+    return session.send_tool_list_changed()
 
 
 class DesktopControlServer(MCPServer):
     """MCP server whose tools/list follows the active domain profile."""
 
     active_session: Any = None
+    active_loop: Any = None
 
     async def list_tools(self):
         tools = await super().list_tools()
@@ -53,6 +68,9 @@ class DesktopControlServer(MCPServer):
     async def call_tool(self, name, arguments, context=None):
         if context is not None and getattr(context, "session", None) is not None:
             self.active_session = context.session
+            import asyncio
+
+            self.active_loop = asyncio.get_running_loop()
         if not toolset_manager.is_tool_active(name):
             raise ToolError(f"Tool '{name}' is outside the active tool profile. Call manage_toolsets to enable it.")
         return await super().call_tool(name, arguments, context)
@@ -73,7 +91,8 @@ toolset_manager = ToolSetManager(
 
 # Register tools with ToolSetManager for dynamic capability gating
 _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
-    # Core tools
+    # Core tools. The cheap perception tiers (AX tree, OCR, local yes/no) stay in core so
+    # the minimal profile can avoid screenshots.
     "take_screenshot": ("core", "Captures desktop screen with visual perception"),
     "click": ("core", "Emulates mouse clicks"),
     "type_text": ("core", "Types text"),
@@ -88,10 +107,10 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "capture_window": ("window_mgmt", "Captures target or active window"),
     "wait_for_ui_change": ("window_mgmt", "Waits for visual quiescence"),
     # Developer tools
-    "get_accessibility_tree": ("developer", "Queries OS accessibility bus"),
-    "find_element": ("developer", "Finds element in accessibility tree"),
+    "get_accessibility_tree": ("core", "Queries OS accessibility bus"),
+    "find_element": ("core", "Finds element in accessibility tree"),
     "click_and_type": ("developer", "Compound click then type"),
-    "find_and_click": ("developer", "Finds accessibility element and clicks"),
+    "find_and_click": ("core", "Finds accessibility element and clicks"),
     "move_cursor": ("developer", "Moves mouse cursor"),
     "drag_and_drop": ("developer", "Performs mouse drag and drop"),
     "scroll_until_visible": ("developer", "Scrolls until element is visible"),
@@ -104,8 +123,8 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     # Advanced vision
     "configure_vision": ("advanced_vision", "Configures runtime vision parameters"),
     "get_vision_diagnostics": ("advanced_vision", "Returns perception system health"),
-    "ask_screen": ("advanced_vision", "Answers visual questions via OCR/Gemma"),
-    "read_screen_text": ("advanced_vision", "Extracts screen text via local OCR"),
+    "ask_screen": ("core", "Answers visual questions via OCR/Gemma"),
+    "read_screen_text": ("core", "Extracts screen text via local OCR"),
     "find_visual_element": ("advanced_vision", "Finds visual elements without accessibility names"),
     # Plugins
     "list_plugins": ("plugins", "Lists discovered application plugins"),

@@ -88,9 +88,10 @@ class FeedbackLoopController:
             modal_classifier=modal_classifier,
             min_confidence=CONFIG.gemma3_modal_min_confidence,
         )
-        self.quiescence_monitor = getattr(hal, "quiescence", None)
-        if self.quiescence_monitor is None and CONFIG.enable_quiescence_monitor and sys.platform != "darwin":
-            self.quiescence_monitor = X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
+        # The session factory picks the monitor per backend (X11 damage, cassette, or sleep).
+        # A HAL built outside the factory (tests, plugins) gets none rather than a real X11
+        # monitor watching a display the HAL never touches.
+        self.quiescence_monitor = getattr(hal, "quiescence", None) if CONFIG.enable_quiescence_monitor else None
         self.journal_correlator = JournalCorrelator()
         self.skill_registry = DynamicSkillRegistry()
         self.trajectory_compiler = TclTrajectoryCompiler()
@@ -100,6 +101,7 @@ class FeedbackLoopController:
         self.bicameral = BicameralStepController(
             hal,
             local_gemma_client=gemma,
+            text_reader=getattr(hal, "read_screen_text", None) or self.read_screen_text,
         )
         self._trajectory_log: List[Dict[str, Any]] = []
         self._act_batches = 0
@@ -634,7 +636,17 @@ class FeedbackLoopController:
             f"Action verified [{phase.value} in {quiescence_elapsed_ms:.1f}ms, dirty_area={dirty_area}px]{details_msg}"
         )
 
-        no_reaction = phase == ExecutionPhase.SETTLING and dirty_area == 0 and verify_delta
+        # A click with no damage and no other evidence is a silent miss. Evidence wins:
+        # a passed post-condition contract or a frame delta means the action landed.
+        no_reaction = (
+            verify_delta
+            and phase == ExecutionPhase.SETTLING
+            and dirty_area == 0
+            and not delta_detected
+            and contract_passed is not True
+        )
+        if no_reaction:
+            status_msg += " No visual reaction detected."
         return ActionVerificationResult(
             success=phase != ExecutionPhase.CONTRACT_FAILED and not no_reaction,
             action_type=action_name,

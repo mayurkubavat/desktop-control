@@ -177,3 +177,76 @@ def test_ask_screen_without_gemma():
     ctrl.neural_grounder.gemma3_grounder = None
     res = ctrl.ask_screen("Is it running?")
     assert res["answer"] is None and res["source"] == "fallback"
+
+
+# ------------------------------------------------- OCR-first visual checks
+
+
+def _with_ocr(ctrl, lines):
+    from vision_mcp.perception.ocr import CachedOCR, OCREngine
+
+    class _Fake(OCREngine):
+        name = "fake"
+
+        @property
+        def is_available(self):
+            return True
+
+        def _recognize(self, image):
+            return list(lines)
+
+    ctrl.ocr = CachedOCR(_Fake())
+    return ctrl
+
+
+def test_visual_query_expected_text_found_by_ocr_skips_gemma():
+    from vision_mcp.perception.ocr import OCRLine
+
+    fake = FakeOllama()  # no replies queued: any Gemma call would fail the test
+    ctrl = _with_ocr(_controller_with_fake(fake), [OCRLine("Simulation finished", 10, 10, 200, 20, 0.97)])
+    contract = PostConditionContract(assertions=[PostConditionAssertion(
+        assertion_type=StateAssertionType.VISUAL_QUERY,
+        visual_question="Has the simulation finished?",
+        visual_expected_text="simulation finished",
+    )])
+    ok, details = ctrl.verify_post_conditions(contract)
+    assert ok and "[ocr]" in details[0]
+    assert fake.chat_calls == []
+
+
+def test_visual_query_falls_back_to_gemma_when_text_absent():
+    fake = FakeOllama(replies=[{"answer": True, "confidence": 0.9, "evidence": "green status icon"}])
+    ctrl = _with_ocr(_controller_with_fake(fake), [])
+    contract = PostConditionContract(assertions=[PostConditionAssertion(
+        assertion_type=StateAssertionType.VISUAL_QUERY,
+        visual_question="Is the status icon green?",
+        visual_expected_text="Done",
+    )])
+    ok, details = ctrl.verify_post_conditions(contract)
+    assert ok and "[gemma]" in details[0]
+    assert len(fake.chat_calls) == 1
+    assert fake.chat_calls[0]["options"]["num_predict"] == 80
+
+
+def test_ask_screen_expected_text_only_absent_is_false():
+    ctrl = _with_ocr(_controller_with_fake(FakeOllama()), [])
+    res = ctrl.ask_screen("", expected_text="Saved")
+    assert res["answer"] is False and res["source"] == "ocr"
+
+
+def test_client_warmup_loads_model():
+    from vision_mcp.gemma.client import GemmaClient
+
+    calls = []
+
+    def transport(method, url, body, timeout):
+        calls.append((url, body))
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": "gemma3:4b"}]}
+        return {"done": True}
+
+    client = GemmaClient(transport=transport, keep_alive="10m")
+    assert client.warmup("gemma3:4b") is True
+    url, body = calls[-1]
+    assert url.endswith("/api/generate") and body["prompt"] == "" and body["keep_alive"] == "10m"
+    assert client.warmup("gemma3:27b") is False

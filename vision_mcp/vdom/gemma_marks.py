@@ -70,7 +70,7 @@ _FIND_SCHEMA: Dict[str, Any] = {
     "properties": {
         "mark": {"type": ["integer", "null"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "reason": {"type": "string"},
+        "reason": {"type": "string", "maxLength": 120},
     },
     "required": ["mark", "confidence", "reason"],
 }
@@ -211,6 +211,7 @@ class GemmaMarkLabeler:
                     schema=_LABEL_SCHEMA,
                     images=[encode_image(marked, quality=90)],
                     timeout=self.timeout,
+                    max_tokens=40 * len(batch) + 20,
                 )
             except GemmaError as e:
                 logger.warning(f"Gemma mark labeling failed: {e}")
@@ -251,6 +252,7 @@ class GemmaMarkLabeler:
                 schema=_FIND_SCHEMA,
                 images=[encode_image(marked, quality=90)],
                 timeout=self.timeout,
+                max_tokens=80,
             )
         except GemmaError as e:
             return {"index": None, "confidence": 0.0, "reason": f"Gemma unavailable: {e}", "source": "fallback"}

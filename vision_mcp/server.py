@@ -569,7 +569,11 @@ def _gemma_diagnostics() -> Optional[Dict[str, Any]]:
 
 
 @mcp_server.tool()
-def ask_screen(question: str, region: Optional[List[int]] = None) -> Dict[str, Any]:
+def ask_screen(
+    question: str = "",
+    region: Optional[List[int]] = None,
+    expected_text: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Answers a yes/no question about the screen using the local Gemma model, without
     sending an image back to the client (zero image tokens).
@@ -579,14 +583,17 @@ def ask_screen(question: str, region: Optional[List[int]] = None) -> Dict[str, A
     take_screenshot.
 
     Args:
-        question: A yes/no question about what is visible.
+        question: A yes/no question about what is visible (answered by Gemma, ~seconds).
         region: Optional [x, y, width, height]; defaults to the active window.
+        expected_text: Optional text that proves "yes" (e.g. "Saved", "Simulation finished").
+            Checked first with local OCR (~0.3 s); Gemma runs only if the text is absent
+            and a question is given. Prefer this whenever the outcome shows as text.
 
     Returns:
-        {answer: bool|null, confidence: 0..1, evidence: str, source: 'gemma'|'fallback', region}
+        {answer: bool|null, confidence: 0..1, evidence: str, source: 'ocr'|'gemma'|'fallback', region}
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
-    return controller.ask_screen(question, region=reg_tuple)
+    return controller.ask_screen(question, region=reg_tuple, expected_text=expected_text)
 
 
 @mcp_server.tool()
@@ -1097,8 +1104,18 @@ def execute_trajectory(
     return res.model_dump()
 
 
+def _warmup_gemma() -> None:
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if grounder is not None:
+        grounder.client.warmup(grounder.vision_model)
+
+
 def main():
     """Starts the FastMCP server in standard I/O mode."""
+    if CONFIG.gemma3_warmup_on_start:
+        import threading
+
+        threading.Thread(target=_warmup_gemma, name="gemma-warmup", daemon=True).start()
     mcp_server.run()
 
 

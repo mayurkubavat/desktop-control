@@ -30,8 +30,11 @@ macos = [
     "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
     "pyobjc-framework-ApplicationServices>=10.0; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "onnxruntime>=1.17; sys_platform == 'darwin'",
 ]
 dev = [
+    "onnx>=1.16",
+    "onnxruntime>=1.17",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]

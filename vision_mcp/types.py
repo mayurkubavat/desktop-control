@@ -42,6 +42,11 @@ class PostConditionAssertion(BaseModel):
         default=None,
         description="VISUAL_QUERY: yes/no question answered by local Gemma on a crop (e.g. 'Is the Save dialog closed?')",
     )
+    visual_expected_text: Optional[str] = Field(
+        default=None,
+        description="VISUAL_QUERY: text that proves the condition. Checked with local OCR first (ms); Gemma "
+        "is only asked if the text is absent and visual_question is set.",
+    )
     visual_region: Optional[List[int]] = Field(
         default=None,
         description="VISUAL_QUERY: [x, y, width, height] crop; defaults to the active window",

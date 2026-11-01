@@ -173,6 +173,10 @@ class VisionConfig(BaseModel):
         default=False,
         description="Name unlabeled VISION_ONLY vDOM nodes with Gemma during capture_vdom (adds seconds per uncached batch).",
     )
+    gemma3_warmup_on_start: bool = Field(
+        default=True,
+        description="Load the Gemma vision model in the background when the server starts, so the first check is warm.",
+    )
     gemma3_timeout_seconds: float = Field(
         default=25.0,
         description="Maximum timeout in seconds for local Gemma 3 inference requests.",

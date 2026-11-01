@@ -152,7 +152,7 @@ _YES_NO_SCHEMA: Dict[str, Any] = {
     "properties": {
         "answer": {"type": "boolean"},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "evidence": {"type": "string"},
+        "evidence": {"type": "string", "maxLength": 120},
     },
     "required": ["answer", "confidence", "evidence"],
 }
@@ -376,6 +376,7 @@ class Gemma3Grounder:
                 schema=_MODAL_SCHEMA,
                 images=images,
                 timeout=timeout or self.timeout,
+                max_tokens=150,
             )
         except GemmaError as e:
             logger.warning(f"Modal classification with Gemma 3 failed: {e}")
@@ -429,7 +430,7 @@ class Gemma3Grounder:
             "You check the state of a desktop application from a screenshot crop.\n"
             "Answer the question with true or false. Base the answer only on what is visible. "
             "If the crop does not show enough to tell, answer false with low confidence. "
-            "evidence is one short sentence quoting the visible text or describing the element you relied on."
+            "evidence is at most 12 words: the visible text or element you relied on."
         )
         try:
             data = self.client.chat_json(
@@ -439,6 +440,7 @@ class Gemma3Grounder:
                 schema=_YES_NO_SCHEMA,
                 images=[encode_image(crop, quality=90)],
                 timeout=timeout or self.timeout,
+                max_tokens=80,
             )
         except GemmaError as e:
             return {"answer": None, "confidence": 0.0, "evidence": f"Gemma unavailable: {e}", "source": "fallback"}

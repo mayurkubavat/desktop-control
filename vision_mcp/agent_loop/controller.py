@@ -329,14 +329,19 @@ class FeedbackLoopController:
 
                 elif assertion.assertion_type == StateAssertionType.VISUAL_QUERY:
                     region = tuple(assertion.visual_region) if assertion.visual_region else None
-                    res = self.ask_screen(assertion.visual_question or "", region=region)
+                    res = self.ask_screen(
+                        assertion.visual_question or "",
+                        region=region,
+                        expected_text=assertion.visual_expected_text,
+                    )
                     if res["answer"] is None:
                         passed = False
                         msg = f"VISUAL_QUERY unanswered ({res['evidence']}); take a screenshot to verify"
                     else:
                         passed = bool(res["answer"]) and res["confidence"] >= CONFIG.gemma3_visual_min_confidence
                         msg = (
-                            f"VISUAL_QUERY '{assertion.visual_question}': answer={res['answer']} "
+                            f"VISUAL_QUERY '{assertion.visual_question or assertion.visual_expected_text}' "
+                            f"[{res['source']}]: answer={res['answer']} "
                             f"confidence={res['confidence']:.2f} evidence='{res['evidence']}'"
                         )
 
@@ -400,25 +405,45 @@ class FeedbackLoopController:
         self,
         question: str,
         region: Optional[Tuple[int, int, int, int]] = None,
+        expected_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Answers a yes/no question about the screen with local Gemma, without
-        returning any image. ``region`` is (x, y, w, h); defaults to the active
-        window, then the full screen. ``answer`` is None when Gemma is off or fails.
+        Answers a yes/no question about the screen without returning any image.
+
+        If ``expected_text`` is given, local OCR checks for it first (hundreds of
+        ms); a hit answers True with no Gemma call. Otherwise local Gemma answers
+        ``question`` on a crop of ``region`` (default: the active window).
+        ``answer`` is None when neither path could answer.
         """
+        region = region or self._default_region()
+        image = self.hal.capture_screen(region=region)
+        ox, oy = (region[0], region[1]) if region else (0, 0)
+
+        if expected_text and self._ocr_available():
+            hits = [ln for ln in self.ocr.recognize(image) if text_matches(expected_text, ln.text)]
+            if hits:
+                ln = hits[0].shifted(ox, oy)
+                return {
+                    "answer": True,
+                    "confidence": round(ln.confidence, 3),
+                    "evidence": f"OCR found '{ln.text}' at {list(ln.center)}",
+                    "source": "ocr",
+                    "region": list(region) if region else None,
+                }
+            if not question.strip():
+                return {
+                    "answer": False,
+                    "confidence": 0.9,
+                    "evidence": f"OCR did not find '{expected_text}'",
+                    "source": "ocr",
+                    "region": list(region) if region else None,
+                }
+
         gemma = self.neural_grounder.gemma3_grounder
         if not question.strip():
             return {"answer": None, "confidence": 0.0, "evidence": "empty question", "source": "fallback"}
         if gemma is None:
             return {"answer": None, "confidence": 0.0, "evidence": "Gemma sidecar disabled", "source": "fallback"}
-        if region is None:
-            try:
-                win = self.hal.get_active_window()
-                if win and win.bbox.width > 0 and win.bbox.height > 0:
-                    region = (win.bbox.x, win.bbox.y, win.bbox.width, win.bbox.height)
-            except Exception:
-                region = None
-        image = self.hal.capture_screen(region=region)
         result = gemma.ask_yes_no(image, question)
         result["region"] = list(region) if region else None
         return result

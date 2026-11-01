@@ -164,6 +164,7 @@ class GemmaClient:
         images: Optional[List[str]] = None,
         timeout: Optional[float] = None,
         temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Sends one chat turn and returns the reply parsed as a JSON object.
@@ -182,6 +183,8 @@ class GemmaClient:
             "stream": False,
             "options": {"temperature": temperature},
         }
+        if max_tokens:
+            payload["options"]["num_predict"] = int(max_tokens)
         if self.keep_alive is not None:
             payload["keep_alive"] = self.keep_alive
 
@@ -207,6 +210,20 @@ class GemmaClient:
             raise GemmaError(error) from exc
         finally:
             self._record(model, (time.perf_counter() - start) * 1000.0, error)
+
+    def warmup(self, model: str, timeout: float = 120.0) -> bool:
+        """Loads ``model`` into memory (empty prompt) so the first real call is not a cold start."""
+        if not self.has_model(model):
+            return False
+        try:
+            body: Dict[str, Any] = {"model": model, "prompt": "", "stream": False}
+            if self.keep_alive is not None:
+                body["keep_alive"] = self.keep_alive
+            self._transport("POST", f"{self.base_url}/api/generate", body, timeout)
+            return True
+        except Exception as exc:
+            logger.debug("Gemma warmup failed: %s", exc)
+            return False
 
     # ------------------------------------------------------------------- stats
 

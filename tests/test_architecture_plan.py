@@ -6,19 +6,19 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from vision_mcp.agent_loop.bicameral import BicameralStepController, VerificationTier
-from vision_mcp.agent_loop.cache import ActionCache
-from vision_mcp.crystallization.trace_compiler import TraceCompiler, replay_macro
-from vision_mcp.hal.errors import CapabilityUnavailable, CassetteMismatch
-from vision_mcp.hal.factory import get_desktop_hal, reset_desktop_hal
-from vision_mcp.hal.linux_wayland import WaylandHAL
-from vision_mcp.hal.mock_replay import MockReplayHAL, ScreenFrameState, Transition, load_cassette
-from vision_mcp.hal.protocols import IDesktopHALProtocol, IQuiescenceMonitor
-from vision_mcp.perception.grounding.engine import GroundingEngine
-from vision_mcp.perception.grounding.magnitude import match_magnitude
-from vision_mcp.perception.window_clipper import WindowClipper
-from vision_mcp.toolset import OutputMode, ToolSetManager
-from vision_mcp.types import (
+from dobby.agent_loop.bicameral import BicameralStepController, VerificationTier
+from dobby.agent_loop.cache import ActionCache
+from dobby.crystallization.trace_compiler import TraceCompiler, replay_macro
+from dobby.hal.errors import CapabilityUnavailable, CassetteMismatch
+from dobby.hal.factory import get_desktop_hal, reset_desktop_hal
+from dobby.hal.linux_wayland import WaylandHAL
+from dobby.hal.mock_replay import MockReplayHAL, ScreenFrameState, Transition, load_cassette
+from dobby.hal.protocols import IDesktopHALProtocol, IQuiescenceMonitor
+from dobby.perception.grounding.engine import GroundingEngine
+from dobby.perception.grounding.magnitude import match_magnitude
+from dobby.perception.window_clipper import WindowClipper
+from dobby.toolset import OutputMode, ToolSetManager
+from dobby.types import (
     BoundingBox,
     CorrelatedStep,
     DisplayMetrics,
@@ -27,7 +27,7 @@ from vision_mcp.types import (
     WindowInfo,
     logical_to_backing,
 )
-import vision_mcp.server as server
+import dobby.server as server
 
 
 def test_logical_points_survive_retina_scale():
@@ -215,7 +215,7 @@ def test_ground_icon_writes_relational_anchor(tmp_path: Path):
 
 
 def test_macro_replay_is_required_before_registration(tmp_path: Path):
-    from vision_mcp.crystallization.registry import DynamicSkillRegistry
+    from dobby.crystallization.registry import DynamicSkillRegistry
 
     steps = [
         CorrelatedStep(

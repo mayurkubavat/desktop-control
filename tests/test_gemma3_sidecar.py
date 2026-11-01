@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 from PIL import Image, ImageDraw
 
-from vision_mcp.gemma.client import GemmaClient, GemmaError, normalize_base_url
-from vision_mcp.types import (
+from dobby.gemma.client import GemmaClient, GemmaError, normalize_base_url
+from dobby.types import (
     BoundingBox,
     ModalRiskTier,
     GroundingSource,
@@ -16,13 +16,13 @@ from vision_mcp.types import (
     VDOMNode,
     VirtualDOMSnapshot,
 )
-from vision_mcp.vdom.gemma3_sidecar import (
+from dobby.vdom.gemma3_sidecar import (
     Gemma3Grounder,
     SemanticROICache,
     compute_dhash,
     hamming_distance,
 )
-from vision_mcp.vdom.sidecar import LocalNeuralGrounder
+from dobby.vdom.sidecar import LocalNeuralGrounder
 
 
 def _create_sample_image(color="white", draw_button=True) -> Image.Image:

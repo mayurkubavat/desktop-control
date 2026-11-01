@@ -1,8 +1,8 @@
 """Regression tests for the review fixes on the session facade, bicameral Tier 0 and toolsets."""
 
-from vision_mcp.agent_loop.bicameral import BicameralStepController
-from vision_mcp.hal.session import DesktopSession
-from vision_mcp.types import DisplayMetrics, DisplayTopology
+from dobby.agent_loop.bicameral import BicameralStepController
+from dobby.hal.session import DesktopSession
+from dobby.types import DisplayMetrics, DisplayTopology
 
 
 class _Backend:
@@ -47,7 +47,7 @@ def test_unavailable_ocr_never_proves_text_absent():
 
 
 def test_cheap_perception_tools_are_core():
-    from vision_mcp.server import _TOOL_DOMAINS
+    from dobby.server import _TOOL_DOMAINS
 
     for name in ("get_accessibility_tree", "find_element", "find_and_click", "read_screen_text", "ask_screen"):
         assert _TOOL_DOMAINS[name][0] == "core", name
@@ -55,6 +55,6 @@ def test_cheap_perception_tools_are_core():
 
 
 def test_controller_without_session_has_no_x11_monitor(mock_hal):
-    from vision_mcp.agent_loop.controller import FeedbackLoopController
+    from dobby.agent_loop.controller import FeedbackLoopController
 
     assert FeedbackLoopController(mock_hal).quiescence_monitor is None

@@ -1,6 +1,6 @@
 # Trajectory spec
 
-Source of truth: `TrajectorySpec` and `TrajectoryStep` in `vision_mcp/types.py`, executed by `vision_mcp/agent_loop/trajectory.py`.
+Source of truth: `TrajectorySpec` and `TrajectoryStep` in `dobby/types.py`, executed by `dobby/agent_loop/trajectory.py`.
 
 ## Spec
 

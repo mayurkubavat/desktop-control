@@ -2,7 +2,7 @@
 
 ## Permissions
 
-dobby needs two macOS permissions, granted to whichever app launches the server process:
+Dobby needs two macOS permissions, granted to whichever app launches the server process:
 
 | Permission | Needed for | Where |
 | --- | --- | --- |
@@ -19,14 +19,14 @@ The server command is the venv's entry point:
 
 | Client | How |
 | --- | --- |
-| Claude Code | `claude mcp add -s user dobby -- <command>`; check with `claude mcp get dobby` |
+| Claude Code | `claude mcp add -s user Dobby -- <command>`; check with `claude mcp get Dobby` |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json`, under `mcpServers` |
 | Antigravity | `~/.gemini/config/mcp_config.json`, under `mcpServers` |
 
 Entry for the two JSON files:
 
 ```json
-"dobby": {
+"Dobby": {
   "command": "/Users/mkubavat/Silicon/DV/git/dobby/.venv/bin/dobby"
 }
 ```

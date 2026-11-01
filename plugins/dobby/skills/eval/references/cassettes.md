@@ -1,6 +1,6 @@
 # Cassettes
 
-Source of truth: `vision_mcp/hal/mock_replay.py` (`MockReplayHAL`, `load_cassette`, `CassetteRecorder`).
+Source of truth: `dobby/hal/mock_replay.py` (`MockReplayHAL`, `load_cassette`, `CassetteRecorder`).
 
 ## Loading
 
@@ -57,7 +57,7 @@ Only `frame_id` is required per frame; the rest default as shown. `image_path` i
 
 Names are lower-cased to `[a-z0-9_-]`; an existing name is refused rather than overwritten. Typed text is stored verbatim: do not record password entry. OCR per frame costs a few hundred milliseconds; pass `capture_ocr=false` for long sessions and rely on AX.
 
-In Python, the same recorder is `LiveCassetteRecorder(name, out_dir, snapshot_fn)` in `vision_mcp/hal/cassette_recorder.py`, attached as `session.recorder`; `FeedbackLoopController.cassette_snapshot` is the live snapshot function.
+In Python, the same recorder is `LiveCassetteRecorder(name, out_dir, snapshot_fn)` in `dobby/hal/cassette_recorder.py`, attached as `session.recorder`; `FeedbackLoopController.cassette_snapshot` is the live snapshot function.
 
 ## expect.json and the replay runner
 
@@ -74,7 +74,7 @@ An optional `expect.json` beside `index.json` states what the final frame must s
 
 - `pytest -m replay`: replays every cassette in `tests/cassettes/` (`tests/test_cassette_replay.py`).
 - `python scripts/replay_cassette.py <folder>` or `--all <parent>`: same check from the command line, exit code 1 on failure.
-- `vision_mcp.hal.cassette_replay.replay_cassette(path)` returns `{ok, steps, total_steps, final_frame, failures}`.
+- `dobby.hal.cassette_replay.replay_cassette(path)` returns `{ok, steps, total_steps, final_frame, failures}`.
 
 The runner replays each recorded transition through the HAL input API, so it proves the cassette is self-consistent and its expectations hold. The useful failures come from code that drives the replay HAL itself (a macro via `crystallize_skill(cassette_path=...)`, a trajectory, a controller change): any call that differs from the recording raises `CassetteMismatch`.
 

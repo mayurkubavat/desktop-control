@@ -8,8 +8,8 @@ import pytest
 import numpy as np
 from PIL import Image, ImageDraw
 
-from vision_mcp.types import BoundingBox, VDOMNode, GroundingSource, UIRole
-from vision_mcp.vdom.fast_detector import (
+from dobby.types import BoundingBox, VDOMNode, GroundingSource, UIRole
+from dobby.vdom.fast_detector import (
     FastONNXUIDetector,
     UIClass,
     UI_CLASS_NAMES,
@@ -19,8 +19,8 @@ from vision_mcp.vdom.fast_detector import (
     postprocess_yolo_detections,
     build_default_ui_detector_model,
 )
-from vision_mcp.vdom.sidecar import LocalNeuralGrounder
-from vision_mcp.vdom.fusion import VDOMFusionEngine
+from dobby.vdom.sidecar import LocalNeuralGrounder
+from dobby.vdom.fusion import VDOMFusionEngine
 
 
 def test_letterbox_and_unletterbox():

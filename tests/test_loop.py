@@ -2,8 +2,8 @@
 
 import pytest
 from PIL import Image
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.types import UIElement, BoundingBox
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.types import UIElement, BoundingBox
 
 
 def test_feedback_loop_coordinate_resolution(mock_hal):

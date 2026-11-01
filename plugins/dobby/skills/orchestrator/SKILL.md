@@ -1,11 +1,11 @@
 ---
 name: orchestrator
-description: Entry point for any task that drives the Mac or Linux desktop through the dobby MCP server. Covers the cheapest-first perception ladder, verified actions, recovery, safety, and which dobby skill to load next.
+description: Entry point for any task that drives the Mac or Linux desktop through the Dobby MCP server. Covers the cheapest-first perception ladder, verified actions, recovery, safety, and which Dobby skill to load next.
 ---
 
 # Desktop-control orchestrator
 
-You plan; dobby and local Gemma perceive and verify. Gemma never plans and never gives click coordinates. Coordinates come from the accessibility tree, OCR boxes or numbered marks.
+You plan; Dobby and local Gemma perceive and verify. Gemma never plans and never gives click coordinates. Coordinates come from the accessibility tree, OCR boxes or numbered marks.
 
 ## Load the right companion skill
 
@@ -41,7 +41,7 @@ You plan; dobby and local Gemma perceive and verify. Gemma never plans and never
 - For 3 or more known steps, send one `execute_trajectory(trajectory_spec)`; it stops at the first failed step.
 - Use `scroll_until_visible(query)`, not scroll-and-look loops.
 - After builds, simulations or page loads, use `wait_for_ui_change` instead of polling with screenshots.
-- For a longer known sequence that local Gemma should check step by step without you in the loop, write a plan JSON and run it with the ADK pipeline (`python -m vision_mcp.adk plan.json`). You read only its report: every step's tier and verdict, or where it stopped and what the screen showed. See `references/adk-pipeline.md`.
+- For a longer known sequence that local Gemma should check step by step without you in the loop, write a plan JSON and run it with the ADK pipeline (`python -m dobby.adk plan.json`). You read only its report: every step's tier and verdict, or where it stopped and what the screen showed. See `references/adk-pipeline.md`.
 
 ## 3. Recovery (in order, then stop)
 

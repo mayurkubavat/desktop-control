@@ -8,10 +8,10 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.agent_loop.obstruction import SemanticModalRouter
-from vision_mcp.gemma.client import GemmaClient
-from vision_mcp.types import (
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.obstruction import SemanticModalRouter
+from dobby.gemma.client import GemmaClient
+from dobby.types import (
     BoundingBox,
     ModalButtonOption,
     ModalRiskTier,
@@ -20,7 +20,7 @@ from vision_mcp.types import (
     StateAssertionType,
     WindowInfo,
 )
-from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
 from test_gemma3_sidecar import FakeOllama
 
@@ -186,7 +186,7 @@ def test_ask_screen_without_gemma():
 
 
 def _with_ocr(ctrl, lines):
-    from vision_mcp.perception.ocr import CachedOCR, OCREngine
+    from dobby.perception.ocr import CachedOCR, OCREngine
 
     class _Fake(OCREngine):
         name = "fake"
@@ -203,7 +203,7 @@ def _with_ocr(ctrl, lines):
 
 
 def test_visual_query_expected_text_found_by_ocr_skips_gemma():
-    from vision_mcp.perception.ocr import OCRLine
+    from dobby.perception.ocr import OCRLine
 
     fake = FakeOllama()  # no replies queued: any Gemma call would fail the test
     ctrl = _with_ocr(_controller_with_fake(fake), [OCRLine("Simulation finished", 10, 10, 200, 20, 0.97)])
@@ -238,7 +238,7 @@ def test_ask_screen_expected_text_only_absent_is_false():
 
 
 def test_client_warmup_loads_model():
-    from vision_mcp.gemma.client import GemmaClient
+    from dobby.gemma.client import GemmaClient
 
     calls = []
 

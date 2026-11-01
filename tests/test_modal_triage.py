@@ -6,11 +6,11 @@ Tests SemanticModalRouter, ObstructionInterceptor, risk classification tiers, an
 import pytest
 from unittest.mock import MagicMock
 
-from vision_mcp.agent_loop.obstruction import (
+from dobby.agent_loop.obstruction import (
     SemanticModalRouter,
     ObstructionInterceptor,
 )
-from vision_mcp.types import (
+from dobby.types import (
     BoundingBox,
     UIElement,
     WindowInfo,
@@ -19,11 +19,11 @@ from vision_mcp.types import (
     ModalEscalationPayload,
     ModalTriageResult,
 )
-from vision_mcp.server import (
+from dobby.server import (
     dismiss_obstructions,
     resolve_modal_dialog,
 )
-from vision_mcp.hal.base import IDesktopHAL
+from dobby.hal.base import IDesktopHAL
 
 
 class MockHAL(IDesktopHAL):

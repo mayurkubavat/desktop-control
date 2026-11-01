@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from vision_mcp.hal.macos import KEYCODES, MacHAL
-from vision_mcp.perception.ax import AXInspector
+from dobby.hal.macos import KEYCODES, MacHAL
+from dobby.perception.ax import AXInspector
 
 
 class FakeQuartz:
@@ -94,9 +94,9 @@ class FakeAppKit:
 
 @pytest.fixture(autouse=True)
 def _no_cooldown(monkeypatch):
-    from vision_mcp.config import CONFIG
+    from dobby.config import CONFIG
     monkeypatch.setattr(CONFIG, "action_cooldown_ms", 0)
-    monkeypatch.setattr("vision_mcp.hal.macos.time.sleep", lambda s: None)
+    monkeypatch.setattr("dobby.hal.macos.time.sleep", lambda s: None)
 
 
 def _hal(**kw):
@@ -264,8 +264,8 @@ def test_ax_inspector_node_budget():
 
 
 def test_factory_picks_mac_hal(monkeypatch):
-    import vision_mcp.hal.factory as factory
-    import vision_mcp.hal.macos as macos
+    import dobby.hal.factory as factory
+    import dobby.hal.macos as macos
 
     monkeypatch.setattr(factory, "_HAL_INSTANCE", None)
     monkeypatch.setattr(factory.sys, "platform", "darwin")
@@ -277,7 +277,7 @@ def test_factory_picks_mac_hal(monkeypatch):
 
 
 def test_ax_inspector_enables_electron_web_content(monkeypatch):
-    from vision_mcp.config import CONFIG
+    from dobby.config import CONFIG
 
     monkeypatch.setattr(CONFIG, "ax_web_content_settle_seconds", 0)
     send = _el("AXButton", (200, 300, 60, 24), AXTitle="Send", AXEnabled=True)
@@ -300,7 +300,7 @@ def test_ax_inspector_native_app_rejects_flag_harmlessly():
 
 
 def test_ax_inspector_web_content_can_be_disabled(monkeypatch):
-    from vision_mcp.config import CONFIG
+    from dobby.config import CONFIG
 
     monkeypatch.setattr(CONFIG, "ax_enable_web_content", False)
     insp = _inspector()
@@ -320,7 +320,7 @@ def test_ax_inspector_wrapper_groups_do_not_use_depth():
 
 
 def test_ax_inspector_includes_top_level_menu_bar(monkeypatch):
-    from vision_mcp.config import CONFIG
+    from dobby.config import CONFIG
 
     item_in_menu = _el("AXMenuItem", (60, 30, 120, 20), AXTitle="New Note")
     menu = _el("AXMenu", (60, 25, 200, 300), children=[item_in_menu])

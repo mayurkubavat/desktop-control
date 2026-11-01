@@ -1,9 +1,9 @@
 ---
 name: troubleshoot
-description: Fix dobby when it misbehaves - a missing tool, an empty accessibility tree, OCR or Gemma unavailable, black captures, the server failing to start in Claude Code, Claude Desktop or Antigravity, or Linux window focus problems. Use when a dobby call errors or returns nothing useful.
+description: Fix Dobby when it misbehaves - a missing tool, an empty accessibility tree, OCR or Gemma unavailable, black captures, the server failing to start in Claude Code, Claude Desktop or Antigravity, or Linux window focus problems. Use when a Dobby call errors or returns nothing useful.
 ---
 
-# Troubleshooting dobby
+# Troubleshooting Dobby
 
 Start with `get_vision_diagnostics` (in the `advanced_vision` toolset; enable it if needed). It reports the platform, display server, active window, the OCR engine, and Gemma's availability, installed models and last error. Then match the symptom:
 

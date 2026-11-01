@@ -2,8 +2,8 @@
 
 from PIL import Image
 
-from vision_mcp.gemma.client import GemmaClient
-from vision_mcp.gemma.prompts import (
+from dobby.gemma.client import GemmaClient
+from dobby.gemma.prompts import (
     PROMPTS,
     evidence_in_ocr,
     get_prompt,
@@ -11,7 +11,7 @@ from vision_mcp.gemma.prompts import (
     parse_answer,
     yes_no_user,
 )
-from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
 from test_gemma3_sidecar import FakeOllama
 
@@ -117,8 +117,8 @@ def test_verify_only_does_not_show_ocr_to_gemma():
 def test_ask_screen_verifies_with_ocr_by_default():
     from unittest.mock import MagicMock
 
-    from vision_mcp.agent_loop.controller import FeedbackLoopController
-    from vision_mcp.perception.ocr import CachedOCR, OCREngine, OCRLine
+    from dobby.agent_loop.controller import FeedbackLoopController
+    from dobby.perception.ocr import CachedOCR, OCREngine, OCRLine
 
     class _Ocr(OCREngine):
         name = "fake"

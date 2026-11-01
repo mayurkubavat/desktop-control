@@ -8,8 +8,8 @@ import pytest
 import numpy as np
 from PIL import Image, ImageDraw
 
-from vision_mcp.types import BoundingBox, WindowInfo, UIElement
-from vision_mcp.agent_loop.cache import (
+from dobby.types import BoundingBox, WindowInfo, UIElement
+from dobby.agent_loop.cache import (
     ActionCache,
     CachedLocator,
     compute_dhash,
@@ -18,7 +18,7 @@ from vision_mcp.agent_loop.cache import (
     base64_to_image,
     template_match_neighborhood,
 )
-from vision_mcp.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.controller import FeedbackLoopController
 
 
 class MockHAL:
@@ -340,7 +340,7 @@ def test_controller_find_and_click_healed():
 
 def test_manage_cache_verify_and_heal():
     """Validates manage_cache tool with verify, heal, and stats actions."""
-    from vision_mcp.server import manage_cache, controller
+    from dobby.server import manage_cache, controller
 
     # 1. Stats action
     stats = manage_cache(action="stats")

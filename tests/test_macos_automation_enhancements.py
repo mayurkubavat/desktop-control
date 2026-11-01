@@ -11,15 +11,15 @@ import pytest
 from unittest.mock import MagicMock
 from PIL import Image
 
-from vision_mcp.types import (
+from dobby.types import (
     TrajectoryStep,
     TrajectorySpec,
     BoundingBox,
     UIElement,
     WindowInfo,
 )
-from vision_mcp.agent_loop.trajectory import TrajectoryEngine
-from vision_mcp.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.trajectory import TrajectoryEngine
+from dobby.agent_loop.controller import FeedbackLoopController
 
 
 class MockHAL:

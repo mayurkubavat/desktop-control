@@ -1,9 +1,9 @@
 """
-Builds the generated references of the dobby skills plugin.
+Builds the generated references of the Dobby skills plugin.
 
 Two kinds of files under plugins/dobby/skills/*/references/:
 
-* Generated from code: the MCP tool reference (from vision_mcp/server.py, read
+* Generated from code: the MCP tool reference (from dobby/server.py, read
   with ast so no desktop backend starts) and each app plugin's feature catalog.
 * Copied from the repo's own notes (learnings/, docs/) so the plugin is
   self-contained when Claude Code copies it into its plugin cache.
@@ -99,7 +99,7 @@ def _params(fn: ast.FunctionDef) -> str:
 
 
 def tools_reference() -> str:
-    src = ROOT / "vision_mcp" / "server.py"
+    src = ROOT / "dobby" / "server.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     domains = _literal_dict(tree, "_TOOL_DOMAINS")
     tools = [n for n in tree.body if isinstance(n, ast.FunctionDef) and _is_tool(n)]
@@ -108,7 +108,7 @@ def tools_reference() -> str:
         domain = domains.get(fn.name, ("unregistered", ""))[0]
         by_domain.setdefault(domain, []).append(fn)
     order = ["core", "window_mgmt", "developer", "advanced_vision", "vdom", "skills", "plugins", "unregistered"]
-    out = [HEADER.format(src="vision_mcp/server.py"), "# dobby MCP tools\n\n",
+    out = [HEADER.format(src="dobby/server.py"), "# Dobby MCP tools\n\n",
            f"{len(tools)} tools. Only `core` is on by default; enable others with "
            "`manage_toolsets(action=\"enable\", domains=[...])`.\n"]
     for domain in sorted(by_domain, key=lambda d: order.index(d) if d in order else len(order)):
@@ -121,10 +121,10 @@ def tools_reference() -> str:
 
 def features_reference(app_id: str) -> str:
     sys.path.insert(0, str(ROOT))
-    from vision_mcp.plugins.registry import PluginRegistry  # noqa: WPS433
+    from dobby.plugins.registry import PluginRegistry  # noqa: WPS433
 
     plugin = PluginRegistry().get(app_id)
-    out = [HEADER.format(src=f"vision_mcp/plugins/{app_id}.py"),
+    out = [HEADER.format(src=f"dobby/plugins/{app_id}.py"),
            f"# {plugin.name}: features\n\n",
            f"Run with `invoke_plugin_feature(feature_id, plugin_id=\"{app_id}\", args={{...}})`. "
            "Prefer these over clicking: they use hotkeys and menus the plugin already knows.\n\n",

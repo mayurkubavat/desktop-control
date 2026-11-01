@@ -6,15 +6,15 @@ import os
 import tempfile
 import pytest
 
-from vision_mcp.crystallization import (
+from dobby.crystallization import (
     JournalCorrelator,
     TclTrajectoryCompiler,
     DynamicSkillRegistry,
     CorrelatedStep,
     CrystallizedSkillSpec,
 )
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.types import BoundingBox, WindowInfo
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.types import BoundingBox, WindowInfo
 
 
 class MockHAL:

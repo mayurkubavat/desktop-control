@@ -2,7 +2,7 @@
 
 import pytest
 from subprocess import CalledProcessError
-import vision_mcp.server as server
+import dobby.server as server
 
 
 def test_mcp_tools_registered():

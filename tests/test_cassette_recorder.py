@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from vision_mcp.hal.cassette_recorder import LiveCassetteRecorder, pixel_delta, sanitize_name
-from vision_mcp.hal.cassette_replay import replay_cassette
-from vision_mcp.hal.mock_replay import MockReplayHAL, ScreenFrameState
-from vision_mcp.hal.session import DesktopSession
-from vision_mcp.types import DisplayTopology, DisplayMetrics
+from dobby.hal.cassette_recorder import LiveCassetteRecorder, pixel_delta, sanitize_name
+from dobby.hal.cassette_replay import replay_cassette
+from dobby.hal.mock_replay import MockReplayHAL, ScreenFrameState
+from dobby.hal.session import DesktopSession
+from dobby.types import DisplayTopology, DisplayMetrics
 
 
 def _session():
@@ -64,8 +64,8 @@ def test_recorded_session_replays(tmp_path: Path):
 
 
 def test_replay_catches_drift(tmp_path: Path):
-    from vision_mcp.hal.errors import CassetteMismatch
-    from vision_mcp.hal.mock_replay import load_cassette
+    from dobby.hal.errors import CassetteMismatch
+    from dobby.hal.mock_replay import load_cassette
 
     session, _ = _session()
     rec = LiveCassetteRecorder("drift", tmp_path, _FakeScreen(), settle_ms=0)
@@ -130,7 +130,7 @@ def test_helpers():
 
 
 def test_mcp_tools_record_and_write(tmp_path: Path, monkeypatch):
-    import vision_mcp.server as server
+    import dobby.server as server
 
     session, _ = _session()
 
@@ -156,7 +156,7 @@ def test_mcp_tools_record_and_write(tmp_path: Path, monkeypatch):
 
 
 def test_controller_snapshot_shape():
-    from vision_mcp.agent_loop.controller import FeedbackLoopController
+    from dobby.agent_loop.controller import FeedbackLoopController
 
     session, _ = _session()
     frame, image = FeedbackLoopController(session).cassette_snapshot(capture_ocr=False)

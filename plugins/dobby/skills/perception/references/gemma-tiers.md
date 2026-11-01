@@ -1,4 +1,4 @@
-# Local Gemma in dobby
+# Local Gemma in Dobby
 
 Measured on Mayur's MacBook Pro (16 GB), 2026-11-01, Claude window 1512x949.
 
@@ -22,7 +22,7 @@ Measured on Mayur's MacBook Pro (16 GB), 2026-11-01, Claude window 1512x949.
 
 ## Prompt pack
 
-Every Gemma prompt lives in `vision_mcp/gemma/prompts.py` with an id and version (`yes_no@4`, `modal_triage@1`, `mark_label@1`, `mark_find@1`, `ground_roi@1`, `compress_history@1`). `get_vision_diagnostics` lists the active tags.
+Every Gemma prompt lives in `dobby/gemma/prompts.py` with an id and version (`yes_no@4`, `modal_triage@1`, `mark_label@1`, `mark_find@1`, `ground_roi@1`, `compress_history@1`). `get_vision_diagnostics` lists the active tags.
 
 `yes_no@4` rules, and how to read its answer (v3 made a visible but different state a no, after v2 answered unsure on a red indicator; v4 makes blank crops unsure after v3 invented a dialog on a blank screen, and a near-uniform crop now returns `source: blank_crop` without calling Gemma):
 - `answer` is `true`, `false`, or `null`. `null` with `source: gemma` means Gemma said unsure: take a screenshot, do not retry the same question.
@@ -32,7 +32,7 @@ Every Gemma prompt lives in `vision_mcp/gemma/prompts.py` with an id and version
 
 To try a different wording without editing code, put `<prompt_id>.txt` (system text only) in `~/.dobby/prompts/`; results then report `yes_no@4+local`. Measure it first with `scripts/eval_prompts.py` (see the `eval` skill).
 
-## Settings (`vision_mcp/config.py`, or `configure_vision(setting, value)` at runtime)
+## Settings (`dobby/config.py`, or `configure_vision(setting, value)` at runtime)
 
 - `gemma3_endpoint` (`http://127.0.0.1:11434`), `gemma3_vision_model` and `gemma3_text_model` (`gemma3:4b`).
 - `gemma3_keep_alive` (`10m`) keeps the model loaded between calls; `gemma3_warmup_on_start` loads it at server start.

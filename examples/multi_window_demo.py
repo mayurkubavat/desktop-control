@@ -17,7 +17,7 @@ import subprocess
 import base64
 from typing import Dict, Optional
 
-import vision_mcp.server as server
+import dobby.server as server
 
 
 def run_multi_window_demo():

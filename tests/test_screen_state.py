@@ -5,13 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from vision_mcp.gemma.client import GemmaClient
-from vision_mcp.gemma.decide import GemmaDecider
-from vision_mcp.perception.ocr import OCRLine
-from vision_mcp.screen_state import StateTracker, build_state, rebind
-from vision_mcp.screen_state.observe import act_on_element, decide_next_element, observe
-from vision_mcp.screen_state.state import coarse_position
-from vision_mcp.types import BoundingBox, WindowInfo
+from dobby.gemma.client import GemmaClient
+from dobby.gemma.decide import GemmaDecider
+from dobby.perception.ocr import OCRLine
+from dobby.screen_state import StateTracker, build_state, rebind
+from dobby.screen_state.observe import act_on_element, decide_next_element, observe
+from dobby.screen_state.state import coarse_position
+from dobby.types import BoundingBox, WindowInfo
 
 WIN = WindowInfo(window_id="1", title="Untitled", bbox=BoundingBox(x=0, y=0, width=900, height=600),
                  is_active=True, app_name="TextEdit")

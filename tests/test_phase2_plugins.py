@@ -4,13 +4,13 @@ import pytest
 from unittest.mock import MagicMock
 from PIL import Image
 
-from vision_mcp.types import BoundingBox, SubPaneROI, FeatureDescriptor, WindowInfo
-from vision_mcp.plugins.base import BaseUIAppPlugin
-from vision_mcp.plugins.chrome import ChromeBrowserPlugin
-from vision_mcp.plugins.registry import PluginRegistry
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.server import mcp_server
+from dobby.types import BoundingBox, SubPaneROI, FeatureDescriptor, WindowInfo
+from dobby.plugins.base import BaseUIAppPlugin
+from dobby.plugins.chrome import ChromeBrowserPlugin
+from dobby.plugins.registry import PluginRegistry
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.hal.base import IDesktopHAL
+from dobby.server import mcp_server
 
 
 def test_sub_pane_roi_computation():

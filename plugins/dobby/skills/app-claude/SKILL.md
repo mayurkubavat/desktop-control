@@ -1,11 +1,11 @@
 ---
 name: app-claude
-description: Drive the Claude desktop app (Electron) on macOS with dobby - sidebar, projects, chats and the composer - using its accessibility tree instead of screenshots. Use when a task happens inside the Claude app window.
+description: Drive the Claude desktop app (Electron) on macOS with Dobby - sidebar, projects, chats and the composer - using its accessibility tree instead of screenshots. Use when a task happens inside the Claude app window.
 ---
 
 # Claude desktop app
 
-Claude is an Electron app. Its web content appears in the AX tree once dobby has inspected it (the server sets `AXManualAccessibility` on first read). Verified 2026-11-01: 57 interactable elements versus 3 before.
+Claude is an Electron app. Its web content appears in the AX tree once Dobby has inspected it (the server sets `AXManualAccessibility` on first read). Verified 2026-11-01: 57 interactable elements versus 3 before.
 
 ## Steps
 

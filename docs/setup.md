@@ -13,8 +13,8 @@ This guide covers installing `dobby` and configuring it with various Model Conte
 
 ### Virtual Environment Setup
 ```bash
-git clone https://github.com/<your-org>/dobby.git
-cd dobby
+git clone https://github.com/<your-org>/Dobby.git
+cd Dobby
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -51,8 +51,8 @@ Add `dobby` to your Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "dobby": {
-      "command": "/absolute/path/to/dobby/.venv/bin/dobby",
+    "Dobby": {
+      "command": "/absolute/path/to/Dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":0"
       }
@@ -67,8 +67,8 @@ Add `dobby` to your Antigravity configuration file (`~/.gemini/antigravity-cli/m
 ```json
 {
   "mcpServers": {
-    "dobby": {
-      "command": "/absolute/path/to/dobby/.venv/bin/dobby",
+    "Dobby": {
+      "command": "/absolute/path/to/Dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":20"
       }
@@ -83,8 +83,8 @@ In your project or global Cursor settings (`.cursor/mcp.json`):
 ```json
 {
   "mcpServers": {
-    "dobby": {
-      "command": "/absolute/path/to/dobby/.venv/bin/dobby"
+    "Dobby": {
+      "command": "/absolute/path/to/Dobby/.venv/bin/dobby"
     }
   }
 }

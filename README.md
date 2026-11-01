@@ -31,8 +31,8 @@ A Model Context Protocol (MCP) server for desktop automation, screen perception,
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-org>/dobby.git
-cd dobby
+git clone https://github.com/<your-org>/Dobby.git
+cd Dobby
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -77,8 +77,8 @@ Add `dobby` to your MCP client configuration file:
 ```json
 {
   "mcpServers": {
-    "dobby": {
-      "command": "/path/to/dobby/.venv/bin/dobby",
+    "Dobby": {
+      "command": "/path/to/Dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":0"
       }
@@ -92,8 +92,8 @@ Add `dobby` to your MCP client configuration file:
 ```json
 {
   "mcpServers": {
-    "dobby": {
-      "command": "/path/to/dobby/.venv/bin/dobby",
+    "Dobby": {
+      "command": "/path/to/Dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":20"
       }
@@ -174,7 +174,7 @@ Add `dobby` to your MCP client configuration file:
 
 ```
 dobby/
-├── vision_mcp/             # Main Python package
+├── dobby/             # Main Python package
 │   ├── hal/                # Hardware Abstraction Layer (Linux X11/Wayland, Windows)
 │   ├── perception/         # Screen capture, AT-SPI2, Set-of-Marks, token optimizer
 │   ├── vdom/               # Fast ONNX detector, virtual DOM fusion, layout solver
@@ -232,7 +232,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 ## ADK pipeline (optional)
 
-`pip install -e '.[adk]'`, then `python -m vision_mcp.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/dobby/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
+`pip install -e '.[adk]'`, then `python -m dobby.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/dobby/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
 
 ## Agent skills plugin
 

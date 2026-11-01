@@ -5,9 +5,9 @@ import math
 import pytest
 from PIL import Image, ImageDraw
 
-from vision_mcp.config import CONFIG
-from vision_mcp.gemma.client import GemmaClient, first_token_logprobs
-from vision_mcp.gemma.decide import (
+from dobby.config import CONFIG
+from dobby.gemma.client import GemmaClient, first_token_logprobs
+from dobby.gemma.decide import (
     NONE_OPTION,
     Decision,
     GemmaDecider,
@@ -17,8 +17,8 @@ from vision_mcp.gemma.decide import (
     option_labels,
     shortlist,
 )
-from vision_mcp.gemma.gate import GatePolicy, Risk, RunBudget, Verdict, gate
-from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+from dobby.gemma.gate import GatePolicy, Risk, RunBudget, Verdict, gate
+from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
 
 class FakeLogprobOllama:

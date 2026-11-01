@@ -129,10 +129,10 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="print the full report as JSON")
     args = ap.parse_args()
 
-    from vision_mcp.config import CONFIG
-    from vision_mcp.gemma.prompts import get_prompt
-    from vision_mcp.perception.ocr import get_ocr_engine
-    from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+    from dobby.config import CONFIG
+    from dobby.gemma.prompts import get_prompt
+    from dobby.perception.ocr import get_ocr_engine
+    from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
     if args.prompt_dir is not None:
         CONFIG.gemma3_prompt_dir = args.prompt_dir

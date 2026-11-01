@@ -7,8 +7,8 @@ import os
 import pytest
 from unittest.mock import MagicMock, patch
 
-from vision_mcp.hal.quiescence import X11QuiescenceMonitor
-from vision_mcp.types import (
+from dobby.hal.quiescence import X11QuiescenceMonitor
+from dobby.types import (
     ExecutionPhase,
     StateAssertionType,
     PostConditionAssertion,
@@ -17,8 +17,8 @@ from vision_mcp.types import (
     WindowInfo,
     UIElement,
 )
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.hal.base import IDesktopHAL
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.hal.base import IDesktopHAL
 
 
 class MockHAL(IDesktopHAL):

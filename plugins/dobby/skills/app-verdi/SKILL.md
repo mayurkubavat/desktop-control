@@ -1,6 +1,6 @@
 ---
 name: app-verdi
-description: Automate Synopsys Verdi (nWave, nTrace, nSchema) and similar dense EDA debug UIs with dobby - docked windows, hotkeys after pane focus, and value-column OCR. Use when a task involves Verdi waveforms, driver tracing or schematic debug.
+description: Automate Synopsys Verdi (nWave, nTrace, nSchema) and similar dense EDA debug UIs with Dobby - docked windows, hotkeys after pane focus, and value-column OCR. Use when a task involves Verdi waveforms, driver tracing or schematic debug.
 ---
 
 # Verdi

@@ -3,9 +3,9 @@
 import os
 import sys
 import pytest
-from vision_mcp.hal.linux import LinuxHAL
-from vision_mcp.hal.factory import get_desktop_hal
-from vision_mcp.hal.base import IDesktopHAL
+from dobby.hal.linux import LinuxHAL
+from dobby.hal.factory import get_desktop_hal
+from dobby.hal.base import IDesktopHAL
 
 _needs_x11 = pytest.mark.skipif(
     sys.platform == "darwin" or sys.platform == "win32" or not os.environ.get("DISPLAY"),

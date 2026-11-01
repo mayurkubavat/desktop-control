@@ -2,7 +2,7 @@
   "mcpServers": {
     "vision-control": {
       "command": "/home/mk/DV/git/Vision/.venv/bin/python3",
-      "args": ["-m", "vision_mcp.server"],
+      "args": ["-m", "dobby.server"],
       "env": {
         "DISPLAY": ":20",
         "PYTHONUNBUFFERED": "1"

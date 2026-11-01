@@ -1,9 +1,9 @@
 ---
 name: eval
-description: Check that a change to dobby (prompts, local models, perception or server code) helps rather than hurts - unit and replay tests, cassettes, and the local benchmark. Use before committing such a change, or when comparing two models or prompts.
+description: Check that a change to Dobby (prompts, local models, perception or server code) helps rather than hurts - unit and replay tests, cassettes, and the local benchmark. Use before committing such a change, or when comparing two models or prompts.
 ---
 
-# Evaluating dobby changes
+# Evaluating Dobby changes
 
 A change lands only with evidence that it helped. Run these in order; stop at the first failure.
 

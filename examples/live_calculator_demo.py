@@ -18,8 +18,8 @@ from typing import Dict, List, Optional
 from PIL import Image
 import io
 
-import vision_mcp.server as server
-from vision_mcp.types import UIElement
+import dobby.server as server
+from dobby.types import UIElement
 
 
 def run_demo():

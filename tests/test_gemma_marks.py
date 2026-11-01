@@ -8,11 +8,11 @@ from unittest.mock import MagicMock
 
 from PIL import Image, ImageDraw
 
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.gemma.client import GemmaClient
-from vision_mcp.types import BoundingBox, GroundingSource, UIRole, VDOMNode, VirtualDOMSnapshot, WindowInfo
-from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
-from vision_mcp.vdom.gemma_marks import GemmaMarkLabeler, draw_marks
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.gemma.client import GemmaClient
+from dobby.types import BoundingBox, GroundingSource, UIRole, VDOMNode, VirtualDOMSnapshot, WindowInfo
+from dobby.vdom.gemma3_sidecar import Gemma3Grounder
+from dobby.vdom.gemma_marks import GemmaMarkLabeler, draw_marks
 
 from test_gemma3_sidecar import FakeOllama
 
@@ -155,7 +155,7 @@ def test_capture_vdom_captures_window_region():
     ctrl.pipeline.capture.return_value = (_toolbar(), 1.0, (1200, 400), (0, 0))
     ctrl.atspi_inspector = MagicMock()
     ctrl.atspi_inspector.inspect_desktop.return_value = []
-    from vision_mcp.vdom.fusion import VDOMFusionEngine
+    from dobby.vdom.fusion import VDOMFusionEngine
     ctrl.vdom_fusion = VDOMFusionEngine()
     ctrl.capture_vdom(label_with_gemma=False)
     assert ctrl.pipeline.capture.call_args.kwargs["region"] == (500, 300, 1200, 400)

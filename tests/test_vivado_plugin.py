@@ -4,11 +4,11 @@ import pytest
 from unittest.mock import MagicMock
 from PIL import Image
 
-from vision_mcp.types import BoundingBox, WindowInfo
-from vision_mcp.plugins.vivado import VivadoPlugin
-from vision_mcp.plugins.registry import PluginRegistry
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.hal.base import IDesktopHAL
+from dobby.types import BoundingBox, WindowInfo
+from dobby.plugins.vivado import VivadoPlugin
+from dobby.plugins.registry import PluginRegistry
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.hal.base import IDesktopHAL
 
 
 def test_vivado_plugin_detection():

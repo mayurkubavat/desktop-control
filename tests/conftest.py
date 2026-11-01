@@ -4,8 +4,8 @@ import pytest
 from typing import Tuple, List, Optional
 from PIL import Image
 
-from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.types import WindowInfo, BoundingBox
+from dobby.hal.base import IDesktopHAL
+from dobby.types import WindowInfo, BoundingBox
 
 
 class MockDesktopHAL(IDesktopHAL):

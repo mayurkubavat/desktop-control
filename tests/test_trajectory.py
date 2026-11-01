@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import MagicMock
 from PIL import Image
 
-from vision_mcp.types import (
+from dobby.types import (
     TrajectoryStep,
     TrajectorySpec,
     StepExecutionResult,
@@ -18,8 +18,8 @@ from vision_mcp.types import (
     GroundingSource,
     UIRole,
 )
-from vision_mcp.agent_loop.trajectory import TrajectoryEngine
-from vision_mcp.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.trajectory import TrajectoryEngine
+from dobby.agent_loop.controller import FeedbackLoopController
 
 
 class MockHAL:
@@ -272,7 +272,7 @@ def test_trajectory_continue_on_failure():
 
 def test_server_execute_trajectory_tool():
     """Validates server execute_trajectory FastMCP tool."""
-    from vision_mcp.server import execute_trajectory
+    from dobby.server import execute_trajectory
 
     spec_dict = {
         "trajectory_name": "server_mcp_batch",

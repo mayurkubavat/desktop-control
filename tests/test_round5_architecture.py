@@ -12,23 +12,23 @@ Validates:
 import json
 import pytest
 from pathlib import Path
-from vision_mcp.hal.protocols import (
+from dobby.hal.protocols import (
     IScreenCapture,
     IInputDriver,
     IWindowManager,
     IDesktopHALProtocol,
 )
-from vision_mcp.hal.mock_replay import MockReplayHAL, ScreenFrameState
-from vision_mcp.hal.factory import get_desktop_hal
-from vision_mcp.toolset import ToolSetManager, ToolDefinition, OutputMode
-from vision_mcp.agent_loop.bicameral import (
+from dobby.hal.mock_replay import MockReplayHAL, ScreenFrameState
+from dobby.hal.factory import get_desktop_hal
+from dobby.toolset import ToolSetManager, ToolDefinition, OutputMode
+from dobby.agent_loop.bicameral import (
     BicameralStepController,
     VerificationTier,
     StepExecutionVerdict,
     COMPACT_PROMPT_TEMPLATE,
 )
-import vision_mcp.server as server
-from vision_mcp.types import WindowInfo, BoundingBox
+import dobby.server as server
+from dobby.types import WindowInfo, BoundingBox
 
 
 def test_hal_protocols_runtime_checkable():
@@ -333,7 +333,7 @@ def test_compact_trajectory_history_8_part_invariant():
 
 def test_cursor_state_checkpoint_schema_validation():
     """Verify StateCheckpoint Pydantic model validates structured fields."""
-    from vision_mcp.agent_loop.bicameral import StateCheckpoint, EscalationPredicate
+    from dobby.agent_loop.bicameral import StateCheckpoint, EscalationPredicate
 
     checkpoint = StateCheckpoint(
         user_instructions="Synthesize Vivado top-level module",
@@ -357,8 +357,8 @@ def test_cursor_state_checkpoint_schema_validation():
 
 def test_hal_factory_desktop_hal_replay_override(monkeypatch):
     """Verify DESKTOP_HAL=replay environment override instantiates MockReplayHAL."""
-    from vision_mcp.hal import factory
-    from vision_mcp.hal.mock_replay import MockReplayHAL
+    from dobby.hal import factory
+    from dobby.hal.mock_replay import MockReplayHAL
 
     monkeypatch.setenv("DESKTOP_HAL", "replay")
     factory._HAL_INSTANCE = None  # Reset singleton

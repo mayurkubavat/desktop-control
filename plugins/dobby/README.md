@@ -1,6 +1,6 @@
-# dobby skills plugin
+# Dobby skills plugin
 
-Skills that teach an agent to drive the desktop through the dobby MCP
+Skills that teach an agent to drive the desktop through the Dobby MCP
 server. Each skill is a short `SKILL.md` (when to use it, the steps) plus a
 `references/` folder read only when needed.
 

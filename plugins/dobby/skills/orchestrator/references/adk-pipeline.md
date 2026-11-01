@@ -1,6 +1,6 @@
 # ADK pipeline: plans checked by local Gemma
 
-`vision_mcp/adk` runs a plan you wrote, step by step, on Google ADK. Code calls the desktop tools; local Gemma only judges, through ADK `LlmAgent`s with an `output_schema` (which turns tools off for them). Gemma never plans and never picks coordinates. When a step cannot be verified, the run stops and returns a report for you to replan from.
+`dobby/adk` runs a plan you wrote, step by step, on Google ADK. Code calls the desktop tools; local Gemma only judges, through ADK `LlmAgent`s with an `output_schema` (which turns tools off for them). Gemma never plans and never picks coordinates. When a step cannot be verified, the run stops and returns a report for you to replan from.
 
 Install once: `.venv/bin/pip install -e '.[adk]'` (google-adk and litellm; no new model).
 
@@ -29,10 +29,10 @@ Install once: `.venv/bin/pip install -e '.[adk]'` (google-adk and litellm; no ne
 ## Run it
 
 ```bash
-.venv/bin/python -m vision_mcp.adk plan.json            # starts dobby over MCP and drives the live desktop
-.venv/bin/python -m vision_mcp.adk plan.json --json     # full report
+.venv/bin/python -m dobby.adk plan.json            # starts Dobby over MCP and drives the live desktop
+.venv/bin/python -m dobby.adk plan.json --json     # full report
 DESKTOP_HAL=replay DESKTOP_CASSETTE=tests/cassettes/example_click \
-  .venv/bin/python -m vision_mcp.adk examples/adk/example_click_plan.json   # rehearse on a cassette
+  .venv/bin/python -m dobby.adk examples/adk/example_click_plan.json   # rehearse on a cassette
 ```
 
 Exit code 0 means every step passed.
@@ -54,4 +54,4 @@ A model error or bad JSON counts as unsure, never as a pass. On a cassette witho
 
 ## Where the prompts live
 
-The verifier and triage system prompts are `adk_verifier` and `adk_triage` in `vision_mcp/gemma/prompts.py`, overridable like the others (`~/.dobby/prompts/<id>.txt`).
+The verifier and triage system prompts are `adk_verifier` and `adk_triage` in `dobby/gemma/prompts.py`, overridable like the others (`~/.dobby/prompts/<id>.txt`).

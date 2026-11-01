@@ -3,14 +3,14 @@
 import pytest
 from PIL import Image, ImageDraw
 
-from vision_mcp.types import BoundingBox, UIElement
-from vision_mcp.perception.grounding.engine import GroundingEngine
-from vision_mcp.perception.grounding.ensemble import compute_iou, EnsembleGroundingProvider
-from vision_mcp.perception.grounding.template import TemplateGroundingProvider
-from vision_mcp.perception.token_optimizer import TokenOptimizer
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.config import CONFIG
-from vision_mcp.server import (
+from dobby.types import BoundingBox, UIElement
+from dobby.perception.grounding.engine import GroundingEngine
+from dobby.perception.grounding.ensemble import compute_iou, EnsembleGroundingProvider
+from dobby.perception.grounding.template import TemplateGroundingProvider
+from dobby.perception.token_optimizer import TokenOptimizer
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.config import CONFIG
+from dobby.server import (
     find_element,
     click_and_type,
     find_and_click,

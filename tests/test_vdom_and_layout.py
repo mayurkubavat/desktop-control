@@ -5,7 +5,7 @@ Unit tests for Phase 4 (Unified vDOM & Neural Sidecar) and Phase 5 (Dynamic Anch
 import pytest
 from PIL import Image
 
-from vision_mcp.types import (
+from dobby.types import (
     BoundingBox,
     VDOMNode,
     VirtualDOMSnapshot,
@@ -17,13 +17,13 @@ from vision_mcp.types import (
     SubPaneROI,
     WindowInfo,
 )
-from vision_mcp.vdom import (
+from dobby.vdom import (
     VDOMFusionEngine,
     VDOMQueryEngine,
     LocalNeuralGrounder,
     SubPaneLayoutSolver,
 )
-from vision_mcp.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.controller import FeedbackLoopController
 
 
 class MockHAL:

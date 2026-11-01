@@ -7,13 +7,13 @@ import tempfile
 import pytest
 from PIL import Image
 
-from vision_mcp.types import BoundingBox, UIElement, WindowInfo
-from vision_mcp.agent_loop.cache import ActionCache, CachedLocator
-from vision_mcp.perception.window_clipper import WindowClipper
-from vision_mcp.agent_loop.obstruction import ObstructionInterceptor
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.config import CONFIG
-from vision_mcp.server import (
+from dobby.types import BoundingBox, UIElement, WindowInfo
+from dobby.agent_loop.cache import ActionCache, CachedLocator
+from dobby.perception.window_clipper import WindowClipper
+from dobby.agent_loop.obstruction import ObstructionInterceptor
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.config import CONFIG
+from dobby.server import (
     capture_window,
     dismiss_obstructions,
     manage_cache,

@@ -16,10 +16,10 @@ import io
 # Ensure Vision MCP is on path
 sys.path.insert(0, "/home/mk/DV/git/Vision")
 
-from vision_mcp.hal.factory import get_desktop_hal
-from vision_mcp.agent_loop.controller import FeedbackLoopController
-from vision_mcp.agent_loop.trajectory import TrajectoryEngine
-from vision_mcp.types import TrajectorySpec, TrajectoryStep
+from dobby.hal.factory import get_desktop_hal
+from dobby.agent_loop.controller import FeedbackLoopController
+from dobby.agent_loop.trajectory import TrajectoryEngine
+from dobby.types import TrajectorySpec, TrajectoryStep
 
 def main():
     os.environ["DISPLAY"] = ":20"

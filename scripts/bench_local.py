@@ -46,9 +46,9 @@ def main() -> int:
     ap.add_argument("--no-gemma", action="store_true")
     args = ap.parse_args()
 
-    from vision_mcp.hal.factory import get_desktop_hal
-    from vision_mcp.perception.ax import get_accessibility_inspector
-    from vision_mcp.perception.ocr import get_ocr_engine
+    from dobby.hal.factory import get_desktop_hal
+    from dobby.perception.ax import get_accessibility_inspector
+    from dobby.perception.ocr import get_ocr_engine
 
     hal = get_desktop_hal()
     win = hal.get_active_window()
@@ -84,7 +84,7 @@ def main() -> int:
                          "text_tokens": text_tokens([ln.as_dict() for ln in lines])}
 
     if not args.no_gemma:
-        from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+        from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
         g = Gemma3Grounder()
         if g.is_available():

@@ -30,9 +30,9 @@ def main() -> int:
     ap.add_argument("--no-gemma", action="store_true")
     args = ap.parse_args()
 
-    from vision_mcp.hal.factory import get_desktop_hal
-    from vision_mcp.perception.ax import get_accessibility_inspector
-    from vision_mcp.perception.ocr import get_ocr_engine
+    from dobby.hal.factory import get_desktop_hal
+    from dobby.perception.ax import get_accessibility_inspector
+    from dobby.perception.ocr import get_ocr_engine
 
     report = {"platform": sys.platform}
     hal = get_desktop_hal()
@@ -69,7 +69,7 @@ def main() -> int:
                          "sample": [ln.text for ln in (lines or [])[:8]]}
 
     if not args.no_gemma and img is not None:
-        from vision_mcp.vdom.gemma3_sidecar import Gemma3Grounder
+        from dobby.vdom.gemma3_sidecar import Gemma3Grounder
 
         g = Gemma3Grounder()
         report["gemma_available"] = g.is_available()

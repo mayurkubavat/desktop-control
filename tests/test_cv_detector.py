@@ -5,9 +5,9 @@ from PIL import Image
 import cv2
 import pytest
 
-from vision_mcp.perception.cv_detector import CVDetector
-from vision_mcp.types import UIElement
-import vision_mcp.server as server
+from dobby.perception.cv_detector import CVDetector
+from dobby.types import UIElement
+import dobby.server as server
 
 
 def test_cv_detector_synthetic_ui():

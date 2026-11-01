@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vision_mcp.hal.cassette_replay import discover_cassettes, replay_cassette
+from dobby.hal.cassette_replay import discover_cassettes, replay_cassette
 
 CASSETTES = discover_cassettes(Path(__file__).parent / "cassettes")
 

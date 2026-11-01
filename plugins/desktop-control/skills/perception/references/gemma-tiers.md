@@ -14,11 +14,23 @@ Measured on Mayur's MacBook Pro (16 GB), 2026-11-01, Claude window 1512x949.
 
 | Tool or path | What Gemma does | Fallback |
 | --- | --- | --- |
-| `ask_screen` | Answers a yes/no with short evidence, after OCR could not settle it | `answer: null`, `source: fallback`; caller escalates |
+| `ask_screen` | Answers yes, no or unsure with evidence, after OCR could not settle it; sees the crop's OCR text | `answer: null` (unsure or unavailable); caller escalates |
 | `find_visual_element` | Picks one numbered box (Set-of-Marks) matching a description | OCR match first; none found returns no element |
 | `capture_vdom(label_with_gemma=true)` | Names unnamed detector boxes; cached per app by patch dHash | Boxes stay unnamed |
 | Modal triage (obstruction interceptor) | Tie-breaker on dialog risk when rules disagree; fail-closed | Escalates, never auto-dismisses |
 | Bicameral Tier 1 | Judges a step's expected outcome after Tier 0 (AX diff, OCR) is unsure | Tier 2 (cloud screenshot) |
+
+## Prompt pack
+
+Every Gemma prompt lives in `vision_mcp/gemma/prompts.py` with an id and version (`yes_no@2`, `modal_triage@1`, `mark_label@1`, `mark_find@1`, `ground_roi@1`, `compress_history@1`). `get_vision_diagnostics` lists the active tags.
+
+`yes_no@2` rules, and how to read its answer:
+- `answer` is `true`, `false`, or `null`. `null` with `source: gemma` means Gemma said unsure: take a screenshot, do not retry the same question.
+- `evidence_type: text` means the evidence is visible words. They are checked against local OCR of the same crop; `evidence_verified: false` means OCR could not find them, and confidence is capped at 0.5 (below every pass bar). Treat that as unsure.
+- `evidence_type: visual` (a color, icon, layout) is not checked; give it less weight than verified text.
+- `prompt` names the version that answered, so a regression can be traced to a prompt change.
+
+To try a different wording without editing code, put `<prompt_id>.txt` (system text only) in `~/.desktop-control/prompts/`; results then report `yes_no@2+local`. Measure it first with `scripts/eval_prompts.py` (see the `eval` skill).
 
 ## Settings (`vision_mcp/config.py`, or `configure_vision(setting, value)` at runtime)
 
@@ -27,6 +39,7 @@ Measured on Mayur's MacBook Pro (16 GB), 2026-11-01, Claude window 1512x949.
 - `gemma3_visual_max_side` (896) caps the image side sent to Gemma; `gemma3_max_marks` (30) caps boxes per call.
 - `gemma3_modal_min_confidence` (0.8) and `gemma3_visual_min_confidence` (0.6) gate acting on an answer.
 - `gemma3_timeout_seconds` (25) per call.
+- `gemma3_ocr_context` (true) sends the crop's OCR text with yes/no questions and checks text evidence; `gemma3_unverified_text_cap` (0.5); `gemma3_prompt_dir` (`~/.desktop-control/prompts`).
 
 ## Models
 
@@ -34,4 +47,4 @@ Only models listed in `~/LocalAI/MODELS.md` are used. Run `~/LocalAI/bin/ai-chec
 
 ## Measuring
 
-`python scripts/bench_local.py --repeats 3` prints these numbers for the active window (read-only, never clicks). `python scripts/smoke_local.py` checks each layer once.
+`python scripts/bench_local.py --repeats 3` prints these numbers for the active window (read-only, never clicks). `python scripts/smoke_local.py` checks each layer once. `python scripts/eval_prompts.py --synthetic` scores the yes/no prompt on labelled crops (correct, wrong, unsure, latency).

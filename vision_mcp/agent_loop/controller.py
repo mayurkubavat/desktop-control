@@ -507,8 +507,10 @@ class FeedbackLoopController:
         image = self.hal.capture_screen(region=region)
         ox, oy = (region[0], region[1]) if region else (0, 0)
 
+        want_ocr = self._ocr_available() and (expected_text or CONFIG.gemma3_ocr_context)
+        ocr_lines = self.ocr.recognize(image) if want_ocr else []
         if expected_text and self._ocr_available():
-            hits = [ln for ln in self.ocr.recognize(image) if text_matches(expected_text, ln.text)]
+            hits = [ln for ln in ocr_lines if text_matches(expected_text, ln.text)]
             if hits:
                 ln = hits[0].shifted(ox, oy)
                 return {
@@ -532,7 +534,8 @@ class FeedbackLoopController:
             return {"answer": None, "confidence": 0.0, "evidence": "empty question", "source": "fallback"}
         if gemma is None:
             return {"answer": None, "confidence": 0.0, "evidence": "Gemma sidecar disabled", "source": "fallback"}
-        result = gemma.ask_yes_no(image, question)
+        context = [ln.text for ln in ocr_lines] if CONFIG.gemma3_ocr_context else None
+        result = gemma.ask_yes_no(image, question, ocr_lines=context or None)
         result["region"] = list(region) if region else None
         return result
 

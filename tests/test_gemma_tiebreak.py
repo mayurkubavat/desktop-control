@@ -144,8 +144,9 @@ def test_visual_query_passes_and_crops_active_window():
     assert ok, details
     ctrl.hal.capture_screen.assert_called_once_with(region=(100, 50, 1600, 1000))
     body = fake.chat_calls[0]
-    assert body["messages"][1]["content"] == "Is the Save dialog closed?"
-    assert body["format"]["required"] == ["answer", "confidence", "evidence"]
+    assert body["messages"][1]["content"] == "Question: Is the Save dialog closed?"
+    assert body["format"]["required"] == ["answer", "confidence", "evidence_type", "evidence"]
+    assert body["format"]["properties"]["answer"]["enum"] == ["yes", "no", "unsure"]
 
 
 def test_visual_query_downscales_crop_to_gemma_tile():

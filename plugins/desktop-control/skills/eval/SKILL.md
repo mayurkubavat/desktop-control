@@ -16,12 +16,15 @@ A change lands only with evidence that it helped. Run these in order; stop at th
 4. **Benchmark on the real desktop** (read-only, never clicks):
    `.venv/bin/python scripts/bench_local.py --repeats 3`
    Compare capture, OCR and Gemma latency and the token-savings block with the previous run.
+5. **For a Gemma prompt or model change, score the prompt** (needs Ollama, never touches the desktop):
+   `.venv/bin/python scripts/eval_prompts.py --synthetic` (add `--cases my.jsonl` for real crops, `--prompt-dir <dir>` to try an override, `--no-ocr` to see what OCR context adds).
+   The number that must not rise is **wrong** (a confident yes or no that is incorrect). More unsure is acceptable; it only costs a screenshot.
 
 ## What to compare
 
 | Change | Must not get worse | Should improve |
 | --- | --- | --- |
-| Gemma prompt or model | Replay accuracy on yes/no and dialog triage | Latency (warm p50), output tokens |
+| Gemma prompt or model | `eval_prompts.py` wrong count, dialog triage tests | Correct count, latency (warm p50) |
 | OCR settings | Lines found on the bench window | OCR ms, text tokens |
 | Perception or ladder logic | Tests, replay verdicts | Screenshots per task |
 | Server tools or toolsets | Tests, tool reference drift check | Tool count in `core` only if each earns its place |

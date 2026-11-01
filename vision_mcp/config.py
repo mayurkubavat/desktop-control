@@ -188,6 +188,18 @@ class VisionConfig(BaseModel):
         default=True,
         description="Load the Gemma vision model in the background when the server starts, so the first check is warm.",
     )
+    gemma3_prompt_dir: Optional[str] = Field(
+        default="~/.desktop-control/prompts",
+        description="Folder of local prompt overrides: <prompt_id>.txt replaces that prompt's system text.",
+    )
+    gemma3_ocr_context: bool = Field(
+        default=True,
+        description="Give Gemma the OCR text of the crop with yes/no questions, and check quoted evidence against it.",
+    )
+    gemma3_unverified_text_cap: float = Field(
+        default=0.5,
+        description="Confidence cap when Gemma quotes text as evidence that OCR cannot find in the crop.",
+    )
     gemma3_timeout_seconds: float = Field(
         default=25.0,
         description="Maximum timeout in seconds for local Gemma 3 inference requests.",

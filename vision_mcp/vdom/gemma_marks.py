@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from vision_mcp.config import CONFIG
+from vision_mcp.gemma.prompts import get_prompt
 from vision_mcp.gemma.client import GemmaClient, GemmaError, encode_image
 from vision_mcp.types import UIRole
 
@@ -198,11 +199,8 @@ class GemmaMarkLabeler:
         for start in range(0, len(pending), self.max_marks):
             batch = pending[start : start + self.max_marks]
             marked = draw_marks(image, [b for _, b, _ in batch], self.max_side)
-            system = (
-                "You name UI elements in a screenshot crop. Each element has a colored box with a number badge.\n"
-                "For each numbered box, give a short label (the visible text, or what the icon does, 1-4 words) "
-                "and its role. Skip boxes you cannot identify. Use only the numbers shown."
-            )
+            spec = get_prompt("mark_label")
+            system = spec.system
             try:
                 data = self.client.chat_json(
                     model=self.vision_model,
@@ -211,7 +209,7 @@ class GemmaMarkLabeler:
                     schema=_LABEL_SCHEMA,
                     images=[encode_image(marked, quality=90)],
                     timeout=self.timeout,
-                    max_tokens=40 * len(batch) + 20,
+                    max_tokens=spec.max_tokens * len(batch) + 20,
                 )
             except GemmaError as e:
                 logger.warning(f"Gemma mark labeling failed: {e}")
@@ -240,10 +238,8 @@ class GemmaMarkLabeler:
         if not boxes or not description.strip():
             return {"index": None, "confidence": 0.0, "reason": "no candidates", "source": "fallback"}
         marked = draw_marks(image, boxes, self.max_side)
-        system = (
-            "You select a UI element in a screenshot crop. Each candidate has a colored box with a number badge.\n"
-            "Return the number of the box that best matches the description, or null if none match."
-        )
+        spec = get_prompt("mark_find")
+        system = spec.system
         try:
             data = self.client.chat_json(
                 model=self.vision_model,
@@ -252,7 +248,7 @@ class GemmaMarkLabeler:
                 schema=_FIND_SCHEMA,
                 images=[encode_image(marked, quality=90)],
                 timeout=self.timeout,
-                max_tokens=80,
+                max_tokens=spec.max_tokens,
             )
         except GemmaError as e:
             return {"index": None, "confidence": 0.0, "reason": f"Gemma unavailable: {e}", "source": "fallback"}

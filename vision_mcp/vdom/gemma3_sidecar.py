@@ -148,15 +148,12 @@ _MODAL_SCHEMA: Dict[str, Any] = {
 }
 
 
-_YES_NO_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "answer": {"type": "boolean"},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "evidence": {"type": "string", "maxLength": 120},
-    },
-    "required": ["answer", "confidence", "evidence"],
-}
+
+
+def _list_prompts():
+    from vision_mcp.gemma.prompts import list_prompts
+
+    return list_prompts()
 
 
 def _fit_image(image: Image.Image, max_side: int) -> Image.Image:
@@ -225,6 +222,7 @@ class Gemma3Grounder:
             "roi_cache_hits": self.cache_hits,
             "mark_label_cache_entries": len(self.marks.cache),
             "mark_label_cache_hits": self.marks.cache_hits,
+            "prompts": {p["id"]: p["tag"] for p in _list_prompts()},
             **self.client.stats(),
         }
 
@@ -270,11 +268,9 @@ class Gemma3Grounder:
                 for item in cached
             ]
 
-        system_prompt = (
-            "You are a UI grounding engine operating on a cropped desktop region.\n"
-            "Identify interactive UI elements (buttons, inputs, dropdowns, icons, waveform signals, schematic pins).\n"
-            "box_2d is [ymin, xmin, ymax, xmax] as integers from 0 to 1000 relative to the image."
-        )
+        from vision_mcp.gemma.prompts import get_prompt
+
+        system_prompt = get_prompt("ground_roi").system
         user_prompt = f"Ground the interactive targets in this '{anchor_id}' crop for '{task_intent}'."
 
         try:
@@ -350,16 +346,10 @@ class Gemma3Grounder:
         not one of ``button_labels``, the verdict is WORKFLOW_BRANCHING with no
         button, so the dialog is escalated instead of clicked.
         """
-        system_prompt = (
-            "You are a safety triage classifier for desktop and EDA software dialogs.\n"
-            "Classify the dialog into exactly one risk tier:\n"
-            "- BENIGN_DISMISSIBLE: tips, telemetry, cookie or update nags; safe to close.\n"
-            "- INFORMATIVE_ACK: a finished-task or status notice with a single acknowledge button.\n"
-            "- WORKFLOW_BRANCHING: a choice that changes what the workflow does next.\n"
-            "- DESTRUCTIVE_OR_SYSTEM: overwrites or deletes files, discards work, kills runs, license or system errors.\n"
-            "suggested_button must be copied exactly from the button list, or null. "
-            "Only suggest a button for BENIGN_DISMISSIBLE or INFORMATIVE_ACK. When unsure, use WORKFLOW_BRANCHING."
-        )
+        from vision_mcp.gemma.prompts import get_prompt
+
+        spec = get_prompt("modal_triage")
+        system_prompt = spec.system
         buttons_line = ", ".join(f'"{b}"' for b in button_labels) if button_labels else "(unknown)"
         user_prompt = f"Dialog text:\n{modal_text}\n\nButtons: {buttons_line}"
 
@@ -377,7 +367,7 @@ class Gemma3Grounder:
                 schema=_MODAL_SCHEMA,
                 images=images,
                 timeout=timeout or self.timeout,
-                max_tokens=150,
+                max_tokens=spec.max_tokens,
             )
         except GemmaError as e:
             logger.warning(f"Modal classification with Gemma 3 failed: {e}")
@@ -416,48 +406,67 @@ class Gemma3Grounder:
         image: Image.Image,
         question: str,
         timeout: Optional[float] = None,
+        ocr_lines: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        Answers a yes/no question about a screen crop.
+        Answers a yes/no question about a screen crop (prompt ``yes_no``).
 
-        Returns ``{answer, confidence, evidence, source}``. ``answer`` is None
-        when Gemma could not answer (unavailable, timeout, bad reply), so the
-        caller can fall back to sending a screenshot to the planner.
+        Returns ``{answer, confidence, evidence, evidence_type, evidence_verified,
+        prompt, source}``. ``answer`` is None when Gemma said unsure or could not
+        answer (unavailable, timeout, bad reply), so the caller falls back to a
+        screenshot. When ``ocr_lines`` (OCR text of the same crop) is given, it is
+        shown to Gemma, and text evidence that OCR cannot find caps confidence at
+        ``CONFIG.gemma3_unverified_text_cap``.
         """
+        from vision_mcp.gemma.prompts import evidence_in_ocr, get_prompt, parse_answer, yes_no_user
+
+        spec = get_prompt("yes_no")
+        base = {"prompt": spec.tag, "evidence_type": "none", "evidence_verified": None}
         if image.size[0] < 4 or image.size[1] < 4:
-            return {"answer": None, "confidence": 0.0, "evidence": "crop too small", "source": "fallback"}
+            return {**base, "answer": None, "confidence": 0.0, "evidence": "crop too small", "source": "fallback"}
         crop = _fit_image(image, CONFIG.gemma3_visual_max_side)
-        system_prompt = (
-            "You check the state of a desktop application from a screenshot crop.\n"
-            "Answer the question with true or false. Base the answer only on what is visible. "
-            "If the crop does not show enough to tell, answer false with low confidence. "
-            "evidence is at most 12 words: the visible text or element you relied on."
-        )
         try:
             data = self.client.chat_json(
                 model=self.vision_model,
-                system=system_prompt,
-                user=question,
-                schema=_YES_NO_SCHEMA,
+                system=spec.system,
+                user=yes_no_user(question, ocr_lines),
+                schema=spec.schema,
                 images=[encode_image(crop, quality=90)],
                 timeout=timeout or self.timeout,
-                max_tokens=80,
+                max_tokens=spec.max_tokens,
             )
         except GemmaError as e:
-            return {"answer": None, "confidence": 0.0, "evidence": f"Gemma unavailable: {e}", "source": "fallback"}
-        answer = data.get("answer")
-        if not isinstance(answer, bool):
-            return {"answer": None, "confidence": 0.0, "evidence": f"bad answer {answer!r}", "source": "fallback"}
+            return {**base, "answer": None, "confidence": 0.0, "evidence": f"Gemma unavailable: {e}", "source": "fallback"}
+        raw = data.get("answer")
+        answer = parse_answer(raw)
         try:
             confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
         except (TypeError, ValueError):
             confidence = 0.0
-        return {
+        evidence = str(data.get("evidence", ""))[:300]
+        ev_type = data.get("evidence_type")
+        if ev_type not in ("text", "visual", "none"):
+            ev_type = "visual"  # v1 replies carry no type: nothing to check
+        result = {
+            **base,
             "answer": answer,
             "confidence": confidence,
-            "evidence": str(data.get("evidence", ""))[:300],
+            "evidence": evidence,
+            "evidence_type": ev_type,
             "source": "gemma",
         }
+        if answer is None:
+            result["confidence"] = 0.0
+            if not (isinstance(raw, str) and raw.strip().lower() == "unsure"):
+                result["evidence"] = f"bad answer {raw!r}"
+                result["source"] = "fallback"
+            return result
+        if ev_type == "text" and ocr_lines:
+            verified = evidence_in_ocr(evidence, ocr_lines)
+            result["evidence_verified"] = verified
+            if not verified:
+                result["confidence"] = min(confidence, CONFIG.gemma3_unverified_text_cap)
+        return result
 
     def evaluate_step(
         self,
@@ -484,14 +493,15 @@ class Gemma3Grounder:
     def compress_history(self, prompt: str) -> str:
         """Asks local Gemma for a JSON StateCheckpoint and returns that JSON."""
         from vision_mcp.agent_loop.bicameral import StateCheckpoint
+        from vision_mcp.gemma.prompts import get_prompt
 
         data = self.client.chat_json(
             model=self.text_model,
-            system="Compress the trajectory into the schema. Emit JSON only.",
+            system=get_prompt("compress_history").system,
             user=prompt,
             schema=StateCheckpoint.model_json_schema(),
             timeout=self.timeout,
-            max_tokens=400,
+            max_tokens=get_prompt("compress_history").max_tokens,
         )
         return json.dumps(StateCheckpoint(**data).model_dump())
 

@@ -121,8 +121,13 @@ def test_controller_click_and_type(mock_hal):
     assert "<enter>" in mock_hal.typed_text
 
 
-def test_mcp_new_server_tools(mock_hal):
+def test_mcp_new_server_tools(mock_hal, monkeypatch):
     """Verifies all new enhanced MCP tools execute successfully."""
+    import dobby.server as server
+
+    # Never drive the real desktop: point the server at the mock HAL.
+    monkeypatch.setattr(server, "hal", mock_hal)
+    monkeypatch.setattr(server, "controller", FeedbackLoopController(mock_hal))
     # 1. configure_vision
     cfg_res = configure_vision(setting="grounding_strategy", value="cv")
     assert cfg_res["success"] is True

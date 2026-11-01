@@ -1,5 +1,8 @@
 """Pytest fixtures and mock classes for Vision Control MCP tests."""
 
+import os
+import sys
+
 import pytest
 from typing import Tuple, List, Optional
 from PIL import Image
@@ -86,3 +89,76 @@ class MockDesktopHAL(IDesktopHAL):
 @pytest.fixture
 def mock_hal() -> MockDesktopHAL:
     return MockDesktopHAL()
+
+
+# ------------------------------------------------- real-desktop input guard
+# A test that reaches the real mouse or keyboard types into whatever app is in
+# front (it once typed into Chrome). Unless the desktop is disposable, such a
+# test is skipped at the point it would post input.
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def _display_is_virtual(display: str, proc_root: str = "/proc", tmp: str = "/tmp") -> bool:
+    """True when DISPLAY is served by Xvfb, Xvnc or Xephyr (a throwaway screen)."""
+    num = display.rsplit(":", 1)[-1].split(".")[0] if ":" in display else ""
+    if not num.isdigit():
+        return False
+    try:
+        with open(os.path.join(tmp, f".X{num}-lock")) as fh:
+            pid = int(fh.read().strip())
+        with open(os.path.join(proc_root, str(pid), "comm")) as fh:
+            name = fh.read().strip()
+    except (OSError, ValueError):
+        return False
+    return name in ("Xvfb", "Xvnc", "Xephyr", "Xvnc4")
+
+
+def live_desktop_allowed(env=None, platform: str = sys.platform, **kw) -> bool:
+    env = os.environ if env is None else env
+    flag = env.get("DOBBY_LIVE_DESKTOP_TESTS", "").strip().lower()
+    if flag in _TRUE:
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False  # force the guard on, e.g. to check what would be skipped
+    if env.get("DOBBY_REPLAY", "").strip().lower() in _TRUE or env.get("DESKTOP_HAL", "").lower() == "replay":
+        return True
+    if platform.startswith("linux"):
+        return _display_is_virtual(env.get("DISPLAY", ""), **kw)
+    return False
+
+
+def _refuse(*_a, **_k):
+    pytest.skip("would send real mouse/keyboard input to this desktop "
+                "(set DOBBY_LIVE_DESKTOP_TESTS=1, or run under Xvfb)")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _guard_real_desktop_input():
+    if live_desktop_allowed():
+        yield
+        return
+    mp = pytest.MonkeyPatch()
+    if sys.platform == "darwin":
+        try:
+            import Quartz  # noqa: F401
+
+            for name in ("CGEventPost", "CGEventPostToPid", "CGEventPostToPSN"):
+                if hasattr(Quartz, name):
+                    mp.setattr(Quartz, name, _refuse)
+        except Exception:  # noqa: BLE001 - no Quartz, nothing to guard
+            pass
+    try:
+        from pynput import keyboard, mouse
+
+        for cls in (mouse.Controller, keyboard.Controller):
+            for name in ("press", "release", "click", "scroll", "move", "type", "tap"):
+                if hasattr(cls, name):
+                    mp.setattr(cls, name, _refuse)
+        mp.setattr(mouse.Controller, "position",
+                   property(lambda self: (0, 0), lambda self, value: _refuse()))
+    except Exception:  # noqa: BLE001 - pynput missing or no display
+        pass
+    try:
+        yield
+    finally:
+        mp.undo()

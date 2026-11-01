@@ -9,7 +9,7 @@ latency. Compare two runs to decide whether a prompt or model change helps.
 
     python scripts/eval_prompts.py --synthetic                 # built-in cases
     python scripts/eval_prompts.py --cases my_cases.jsonl      # your own crops
-    python scripts/eval_prompts.py --synthetic --no-ocr        # without OCR context
+    python scripts/eval_prompts.py --synthetic --ocr-context   # also show Gemma the OCR text
     python scripts/eval_prompts.py --synthetic --prompt-dir ~/try-prompts   # yes_no.txt override
 
 A cases file has one JSON object per line; image paths are relative to the file:
@@ -119,7 +119,8 @@ def main() -> int:
     ap.add_argument("--cases", type=Path, help="JSONL cases file")
     ap.add_argument("--synthetic", action="store_true", help="use the built-in synthetic cases")
     ap.add_argument("--synthetic-dir", type=Path, default=Path("/tmp/dc_prompt_eval"))
-    ap.add_argument("--no-ocr", action="store_true", help="do not pass OCR text or check evidence")
+    ap.add_argument("--no-ocr", action="store_true", help="no OCR at all: evidence is not checked")
+    ap.add_argument("--ocr-context", action="store_true", help="also show Gemma the OCR text (CONFIG.gemma3_ocr_context)")
     ap.add_argument("--prompt-dir", help="folder with <prompt_id>.txt overrides to evaluate")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--json", action="store_true", help="print the full report as JSON")
@@ -155,7 +156,9 @@ def main() -> int:
         lines = [ln.text for ln in ocr.recognize(img)] if ocr else None
         for _ in range(args.repeats):
             t = time.perf_counter()
-            res = gemma.ask_yes_no(img, c["question"], ocr_lines=lines)
+            res = gemma.ask_yes_no(
+                img, c["question"], ocr_lines=lines if args.ocr_context else None, verify_lines=lines
+            )
             ms = (time.perf_counter() - t) * 1000.0
             latencies.append(ms)
             got = _label(res["answer"])
@@ -179,7 +182,8 @@ def main() -> int:
     report = {
         "prompt": get_prompt("yes_no").tag,
         "model": gemma.vision_model,
-        "ocr_context": ocr is not None,
+        "ocr_verify": ocr is not None,
+        "ocr_context": ocr is not None and args.ocr_context,
         "cases": n,
         "correct": count("correct"),
         "wrong": count("wrong"),
@@ -199,7 +203,8 @@ def main() -> int:
             print(f"{mark}{r['image']:<16} {r['question'][:44]:<44} want {'/'.join(r['expect']):<10} "
                   f"got {r['got']:<6} {r['confidence']:.2f} {r['ms']:>5} ms  {r['evidence'][:40]}{ver}")
         print(
-            f"\n{report['prompt']} on {report['model']} (OCR context {'on' if report['ocr_context'] else 'off'}): "
+            f"\n{report['prompt']} on {report['model']} (OCR verify {'on' if report['ocr_verify'] else 'off'}, "
+            f"context {'on' if report['ocr_context'] else 'off'}): "
             f"{report['correct']}/{n} correct, {report['wrong']} wrong, {report['unsure']} unsure, "
             f"{report['errors']} errors; p50 {report['latency_ms_p50']} ms"
         )

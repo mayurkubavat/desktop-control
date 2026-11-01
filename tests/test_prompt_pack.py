@@ -26,14 +26,14 @@ def _ask(reply, ocr=None):
 
 def test_registry_has_every_gemma_call():
     assert set(PROMPTS) == {"yes_no", "modal_triage", "mark_label", "mark_find", "ground_roi", "compress_history"}
-    assert get_prompt("yes_no", prompt_dir="").tag == "yes_no@2"
+    assert get_prompt("yes_no", prompt_dir="").tag == "yes_no@3"
     assert all(p["system"] for p in list_prompts())
 
 
 def test_local_override(tmp_path):
     (tmp_path / "yes_no.txt").write_text("Custom checker prompt.")
     spec = get_prompt("yes_no", prompt_dir=str(tmp_path))
-    assert spec.system == "Custom checker prompt." and spec.tag == "yes_no@2+local"
+    assert spec.system == "Custom checker prompt." and spec.tag == "yes_no@3+local"
     assert spec.schema == PROMPTS["yes_no"].schema
 
 
@@ -49,6 +49,7 @@ def test_evidence_in_ocr():
     assert evidence_in_ocr("Completed synthesis", lines)  # word overlap
     assert not evidence_in_ocr("Implementation failed with errors", lines)
     assert not evidence_in_ocr("", lines)
+    assert not evidence_in_ocr("Saved", ["Unsaved changes"])
 
 
 def test_user_message_includes_ocr_and_truncates():
@@ -60,7 +61,7 @@ def test_user_message_includes_ocr_and_truncates():
 def test_unsure_is_none_not_a_guess():
     res, _ = _ask({"answer": "unsure", "confidence": 0.7, "evidence_type": "none", "evidence": ""})
     assert res["answer"] is None and res["confidence"] == 0.0 and res["source"] == "gemma"
-    assert res["prompt"] == "yes_no@2"
+    assert res["prompt"] == "yes_no@3"
 
 
 def test_text_evidence_confirmed_by_ocr_keeps_confidence():
@@ -94,7 +95,15 @@ def test_bad_answer_falls_back():
     assert res["answer"] is None and res["source"] == "fallback"
 
 
-def test_ask_screen_passes_ocr_context():
+def test_verify_only_does_not_show_ocr_to_gemma():
+    fake = FakeOllama(replies=[{"answer": "yes", "confidence": 0.95, "evidence_type": "text", "evidence": "Saved"}])
+    g = Gemma3Grounder(client=GemmaClient(transport=fake))
+    res = g.ask_yes_no(IMG, "Was it saved?", verify_lines=["Unsaved changes"])
+    assert "OCR text" not in fake.chat_calls[0]["messages"][1]["content"]
+    assert res["evidence_verified"] is False and res["confidence"] <= 0.5
+
+
+def test_ask_screen_verifies_with_ocr_by_default():
     from unittest.mock import MagicMock
 
     from vision_mcp.agent_loop.controller import FeedbackLoopController
@@ -119,4 +128,4 @@ def test_ask_screen_passes_ocr_context():
     ctrl.ocr = CachedOCR(_Ocr())
     res = ctrl.ask_screen("Is the simulation done?")
     assert res["answer"] is True and res["evidence_verified"] is True
-    assert "- Simulation finished" in fake.chat_calls[0]["messages"][1]["content"]
+    assert "OCR text" not in fake.chat_calls[0]["messages"][1]["content"]  # context off by default

@@ -407,6 +407,7 @@ class Gemma3Grounder:
         question: str,
         timeout: Optional[float] = None,
         ocr_lines: Optional[List[str]] = None,
+        verify_lines: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Answers a yes/no question about a screen crop (prompt ``yes_no``).
@@ -414,9 +415,9 @@ class Gemma3Grounder:
         Returns ``{answer, confidence, evidence, evidence_type, evidence_verified,
         prompt, source}``. ``answer`` is None when Gemma said unsure or could not
         answer (unavailable, timeout, bad reply), so the caller falls back to a
-        screenshot. When ``ocr_lines`` (OCR text of the same crop) is given, it is
-        shown to Gemma, and text evidence that OCR cannot find caps confidence at
-        ``CONFIG.gemma3_unverified_text_cap``.
+        screenshot. ``ocr_lines`` (OCR text of the same crop) is shown to Gemma.
+        Text evidence is checked against ``verify_lines`` (default: ``ocr_lines``);
+        a quote OCR cannot find caps confidence at ``CONFIG.gemma3_unverified_text_cap``.
         """
         from vision_mcp.gemma.prompts import evidence_in_ocr, get_prompt, parse_answer, yes_no_user
 
@@ -461,8 +462,9 @@ class Gemma3Grounder:
                 result["evidence"] = f"bad answer {raw!r}"
                 result["source"] = "fallback"
             return result
-        if ev_type == "text" and ocr_lines:
-            verified = evidence_in_ocr(evidence, ocr_lines)
+        check = verify_lines if verify_lines is not None else ocr_lines
+        if ev_type == "text" and check:
+            verified = evidence_in_ocr(evidence, check)
             result["evidence_verified"] = verified
             if not verified:
                 result["confidence"] = min(confidence, CONFIG.gemma3_unverified_text_cap)

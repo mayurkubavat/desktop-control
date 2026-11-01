@@ -193,8 +193,13 @@ class VisionConfig(BaseModel):
         description="Folder of local prompt overrides: <prompt_id>.txt replaces that prompt's system text.",
     )
     gemma3_ocr_context: bool = Field(
+        default=False,
+        description="Also show Gemma the crop's OCR text with yes/no questions. Off by default: on gemma3:4b it "
+        "caused a wrong answer in eval_prompts (see the perception skill). Evidence is OCR-checked either way.",
+    )
+    gemma3_ocr_verify: bool = Field(
         default=True,
-        description="Give Gemma the OCR text of the crop with yes/no questions, and check quoted evidence against it.",
+        description="Check Gemma's quoted text evidence against local OCR of the same crop.",
     )
     gemma3_unverified_text_cap: float = Field(
         default=0.5,

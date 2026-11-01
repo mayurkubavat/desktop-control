@@ -17,7 +17,7 @@ A change lands only with evidence that it helped. Run these in order; stop at th
    `.venv/bin/python scripts/bench_local.py --repeats 3`
    Compare capture, OCR and Gemma latency and the token-savings block with the previous run.
 5. **For a Gemma prompt or model change, score the prompt** (needs Ollama, never touches the desktop):
-   `.venv/bin/python scripts/eval_prompts.py --synthetic` (add `--cases my.jsonl` for real crops, `--prompt-dir <dir>` to try an override, `--no-ocr` to see what OCR context adds).
+   `.venv/bin/python scripts/eval_prompts.py --synthetic` (add `--cases my.jsonl` for real crops, `--prompt-dir <dir>` to try an override, `--ocr-context` to see what showing Gemma the OCR text does).
    The number that must not rise is **wrong** (a confident yes or no that is incorrect). More unsure is acceptable; it only costs a screenshot.
 
 ## What to compare

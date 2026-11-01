@@ -57,18 +57,20 @@ YES_NO_SCHEMA: Dict[str, Any] = {
 
 YES_NO = PromptSpec(
     id="yes_no",
-    version=2,
+    version=3,
     system=(
         "You check the state of a desktop application from a screenshot crop.\n"
         "Answer the question with yes, no, or unsure, based only on what is visible.\n"
-        "- Use unsure when the crop is cut off, blurred, or does not show the thing asked about. "
-        "unsure is a good answer; a wrong yes or no is a bad one.\n"
+        "- If the thing asked about is visible, answer yes or no. If it is visible but differs from "
+        "the question (another color, another state, a dialog still open), the answer is no.\n"
+        "- Use unsure only when the crop is cut off, blurred, or does not show the thing asked about. "
+        "A wrong yes or no is worse than unsure.\n"
         "- evidence_type is text when your answer rests on words visible in the crop; then evidence "
         "is those words copied exactly, nothing else.\n"
         "- evidence_type is visual when it rests on a color, icon, shape or layout; then evidence "
         "describes it in at most 10 words.\n"
         "- evidence_type is none only with unsure.\n"
-        "If an OCR text list is given, it is what a text reader found in the same crop. Prefer quoting from it."
+        "If an OCR text list is given, it is what a text reader found in the same crop."
     ),
     schema=YES_NO_SCHEMA,
     max_tokens=80,
@@ -203,9 +205,9 @@ def evidence_in_ocr(evidence: str, ocr_lines: Iterable[str], min_overlap: float 
     if not ev_words:
         return False
     lines = [ln for ln in ocr_lines if ln]
-    ev_norm = " ".join(ev_words)
+    ev_norm = f" {' '.join(ev_words)} "
     for ln in lines:
-        if ev_norm in " ".join(_words(ln)):
+        if ev_norm in f" {' '.join(_words(ln))} ":  # whole words: "saved" is not in "unsaved"
             return True
     pool = set()
     for ln in lines:

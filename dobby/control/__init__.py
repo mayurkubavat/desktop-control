@@ -1,0 +1,148 @@
+"""Shared control: let several AI agents drive one desktop without racing.
+
+Each AI client starts its own Dobby server. A file-locked lease in
+``~/.dobby/control`` makes sure only one of them moves the mouse or types at a
+time and hands control over when the holder releases it, goes idle, or uses up
+its time slice while another agent waits. Reading the screen never needs the
+lease. See ``lease.py`` for the exact rules.
+
+Environment (set per client in its MCP config):
+
+* ``DOBBY_AGENT_NAME`` - name shown to the other agent and on the overlay
+  (default: the MCP client's name, else ``Dobby-<pid>``).
+* ``DOBBY_AGENT_PRIORITY`` - integer, higher wins the queue (default 0).
+* ``DOBBY_CONTROL=0|1`` - off disables the lease (default on; off under pytest
+  and cassette replay).
+* ``DOBBY_CONTROL_DIR`` (default ``~/.dobby/control``),
+  ``DOBBY_CONTROL_IDLE_GRACE`` (10 s), ``DOBBY_CONTROL_SLICE`` (60 s),
+  ``DOBBY_CONTROL_MAX_WAIT`` (45 s), ``DOBBY_CONTROL_HOLD_CAP`` (120 s),
+  ``DOBBY_CONTROL_PREEMPT=1`` (higher priority takes over at the next step).
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from .controller import ControlBusy, ControlChanged, ControlError, Controller
+from .hal import ACTING, OBSERVING, ControlHAL, find_control_hal, unwrap_control
+from .lease import ControlSettings
+
+__all__ = [
+    "ControlBusy", "ControlChanged", "ControlError", "Controller", "ControlHAL", "ControlSettings",
+    "ACTING", "OBSERVING", "control_enabled", "control_root", "settings_from_env",
+    "get_controller", "set_controller", "adopt_client_name", "agent_name", "wrap_hal", "find_control_hal", "unwrap_control",
+]
+
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off"}
+_CONTROLLER: Optional[Controller] = None
+
+
+def control_enabled(env: Optional[Dict[str, str]] = None) -> bool:
+    env = os.environ if env is None else env
+    flag = env.get("DOBBY_CONTROL", "").strip().lower()
+    if flag in _FALSE:
+        return False
+    if flag in _TRUE:
+        return True
+    if "PYTEST_CURRENT_TEST" in env or env.get("DOBBY_REPLAY", "").lower() in _TRUE:
+        return False
+    return True
+
+
+def control_root(env: Optional[Dict[str, str]] = None) -> Path:
+    env = os.environ if env is None else env
+    return Path(os.path.expanduser(env.get("DOBBY_CONTROL_DIR") or "~/.dobby/control"))
+
+
+def _num(env: Dict[str, str], key: str, default: float, low: float = 0.0) -> float:
+    try:
+        return max(low, float(env[key]))
+    except (KeyError, ValueError):
+        return default
+
+
+def settings_from_env(env: Optional[Dict[str, str]] = None) -> ControlSettings:
+    env = os.environ if env is None else env
+    s = ControlSettings()
+    s.idle_grace = _num(env, "DOBBY_CONTROL_IDLE_GRACE", s.idle_grace, 0.5)
+    s.slice = _num(env, "DOBBY_CONTROL_SLICE", s.slice, 1.0)
+    s.max_wait = _num(env, "DOBBY_CONTROL_MAX_WAIT", s.max_wait, 0.0)
+    s.hold_cap = _num(env, "DOBBY_CONTROL_HOLD_CAP", s.hold_cap, 0.0)
+    s.preempt = env.get("DOBBY_CONTROL_PREEMPT", "").strip().lower() in _TRUE
+    return s
+
+
+def agent_name(env: Optional[Dict[str, str]] = None) -> Optional[str]:
+    env = os.environ if env is None else env
+    name = (env.get("DOBBY_AGENT_NAME") or "").strip()
+    return name or None
+
+
+def get_controller(create: bool = True) -> Optional[Controller]:
+    """The process controller, created on first use when control is enabled."""
+    global _CONTROLLER
+    if _CONTROLLER is None and create and control_enabled():
+        env = os.environ
+        try:
+            priority = int(env.get("DOBBY_AGENT_PRIORITY", "0") or 0)
+        except ValueError:
+            priority = 0
+        _CONTROLLER = Controller(
+            control_root(),
+            name=agent_name() or f"Dobby-{os.getpid()}",
+            priority=priority,
+            settings=settings_from_env(),
+        )
+        _CONTROLLER.name_locked = agent_name() is not None  # type: ignore[attr-defined]
+    return _CONTROLLER
+
+
+def set_controller(ctl: Optional[Controller]) -> None:
+    """Install (or clear) the process controller; for tests and embedding."""
+    global _CONTROLLER
+    _CONTROLLER = ctl
+
+
+def wrap_hal(hal: Any, controller: Optional[Controller] = None) -> Any:
+    """Wrap ``hal`` in :class:`ControlHAL` when shared control is enabled."""
+    if isinstance(hal, ControlHAL):
+        return hal
+    ctl = controller if controller is not None else get_controller()
+    if ctl is None:
+        return hal
+    _wire_overlay(hal, ctl)
+    return ControlHAL(hal, ctl)
+
+
+def _wire_overlay(hal: Any, ctl: Controller) -> None:
+    """Show "Waiting for <agent>" on this agent's overlay while it queues."""
+    try:
+        from dobby.overlay import find_overlay_hal
+    except Exception:  # noqa: BLE001
+        return
+    ov_hal = find_overlay_hal(hal)
+    if ov_hal is None:
+        return
+    overlay = ov_hal.overlay
+
+    def on_wait(holder: Optional[Dict[str, Any]]) -> None:
+        try:
+            if holder is None:
+                overlay.intent("", ms=0)
+            else:
+                overlay.intent(f"Waiting for {holder.get('name') or 'another agent'}", ms=60000)
+        except Exception:  # noqa: BLE001 - cosmetic
+            pass
+
+    ctl.on_wait = on_wait
+
+
+def adopt_client_name(name: Optional[str]) -> None:
+    """Use the MCP client's name (``clientInfo.name``) unless DOBBY_AGENT_NAME is set."""
+    ctl = get_controller(create=False)
+    if ctl is None or not name or getattr(ctl, "name_locked", False):
+        return
+    ctl.set_name(name)

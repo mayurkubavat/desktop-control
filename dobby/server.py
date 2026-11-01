@@ -27,6 +27,7 @@ from dobby.agent_loop.trajectory import TrajectoryEngine
 from dobby.types import FindElementResult, DiagnosticsResult
 from dobby.config import CONFIG
 from dobby.toolset import ToolSetManager, ToolDefinition, OutputMode
+from dobby.control import ControlChanged, adopt_client_name, get_controller
 
 _TOOL_LIST_NOTIFICATIONS: List[str] = []
 
@@ -73,7 +74,24 @@ class DobbyServer(MCPServer):
             self.active_loop = asyncio.get_running_loop()
         if not toolset_manager.is_tool_active(name):
             raise ToolError(f"Tool '{name}' is outside the active tool profile. Call manage_toolsets to enable it.")
-        return await super().call_tool(name, arguments, context)
+        _adopt_client_name(context)
+        ctl = get_controller(create=False)
+        if ctl is None:
+            return await super().call_tool(name, arguments, context)
+        # A tool's steps share one lease turn: the first action acquires it and it
+        # stays busy until the tool returns, so another agent never cuts in between.
+        with ctl.tool_scope():
+            return await super().call_tool(name, arguments, context)
+
+
+def _adopt_client_name(context: Any) -> None:
+    try:
+        params = context.session.client_params  # type: ignore[union-attr]
+        name = params.clientInfo.name if params is not None else None
+    except AttributeError:
+        return
+    if name:
+        adopt_client_name(name)
 
 
 mcp_server = DobbyServer("Dobby")
@@ -100,6 +118,11 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "hotkey": ("core", "Presses hotkey combo"),
     "scroll": ("core", "Scrolls mouse wheel"),
     "manage_toolsets": ("core", "Manages active tool domains and out-of-band output mode"),
+    # Shared control between agents
+    "control_status": ("core", "Shows which agent controls the desktop and who waits"),
+    "request_control": ("core", "Waits for and takes control of the desktop"),
+    "release_control": ("core", "Gives desktop control to a waiting agent"),
+    "hold_control": ("core", "Keeps desktop control through a fragile multi-step flow"),
     # Window management
     "list_windows": ("window_mgmt", "Lists active top-level windows"),
     "get_active_window": ("window_mgmt", "Gets currently active window"),
@@ -1657,6 +1680,77 @@ def _warmup_gemma() -> None:
     grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
     if grounder is not None:
         grounder.client.warmup(grounder.vision_model)
+
+
+def _control_or_none() -> Any:
+    return get_controller(create=False)
+
+
+_CONTROL_OFF = {"ok": True, "shared_control": False,
+                "note": "Shared control is off (DOBBY_CONTROL=0, tests or replay); this agent acts freely."}
+
+
+@mcp_server.tool()
+def control_status() -> Dict[str, Any]:
+    """Shows which agent controls the desktop, how long, and who is waiting.
+
+    Several AI agents can share Dobby. Only the holder can click, type or focus;
+    everyone can take screenshots and read the screen. Control passes on
+    release_control, after the holder is idle for idle_grace_s, or after slice_s
+    while someone waits, always between steps.
+    """
+    ctl = _control_or_none()
+    if ctl is None:
+        return dict(_CONTROL_OFF)
+    return {"ok": True, "shared_control": True, **ctl.status()}
+
+
+@mcp_server.tool()
+def request_control(max_wait_s: Optional[float] = None) -> Dict[str, Any]:
+    """Waits (up to max_wait_s, default the server's max wait) and takes control.
+
+    Not required before acting: every acting tool acquires control by itself.
+    Use it to queue early, before a task, so no time is lost later.
+    """
+    ctl = _control_or_none()
+    if ctl is None:
+        return dict(_CONTROL_OFF)
+    try:
+        ctl.acquire(max_wait=max_wait_s)
+    except ControlChanged as exc:
+        return {"ok": True, "you_hold_control": True, "look_again": True, "note": str(exc)}
+    ctl._finish_without_world()
+    return {"ok": True, "you_hold_control": True, **ctl.status()}
+
+
+@mcp_server.tool()
+def release_control() -> Dict[str, Any]:
+    """Gives up desktop control so a waiting agent can start at once.
+
+    Call it when a task is done or while you plan for a long time.
+    """
+    ctl = _control_or_none()
+    if ctl is None:
+        return dict(_CONTROL_OFF)
+    released = ctl.release()
+    return {"ok": True, "released": released, **ctl.status()}
+
+
+@mcp_server.tool()
+def hold_control(seconds: float = 30.0) -> Dict[str, Any]:
+    """Keeps control for up to `seconds` (capped) even while idle or past the slice.
+
+    For fragile flows that must not be interrupted (a multi-dialog wizard,
+    drag and drop across windows). Takes control first if needed.
+    """
+    ctl = _control_or_none()
+    if ctl is None:
+        return dict(_CONTROL_OFF)
+    try:
+        held = ctl.hold(seconds)
+    except ControlChanged as exc:
+        return {"ok": False, "look_again": True, "note": str(exc)}
+    return {"ok": True, **held, **ctl.status()}
 
 
 def main():

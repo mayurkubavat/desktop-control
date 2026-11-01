@@ -193,6 +193,17 @@ def _cg(rgb: Tuple[float, float, float], alpha: float = 1.0):
     return CGColorCreateGenericRGB(rgb[0], rgb[1], rgb[2], alpha)
 
 
+def _agent_pid_cache():
+    """Live pids of all Dobby servers (shared-control registry), or None."""
+    try:
+        from dobby.control import control_root
+        from dobby.control.registry import AgentPidCache
+
+        return AgentPidCache(control_root())
+    except Exception:  # noqa: BLE001 - the overlay works without it
+        return None
+
+
 def _reduce_motion() -> bool:
     try:
         return bool(NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceMotion())
@@ -903,6 +914,7 @@ class OverlayController:
         self.out = out
         self.out_lock = threading.Lock()
         self.server_pid = int(os.environ.get("DOBBY_SERVER_PID", "0") or 0)
+        self.agent_pids = _agent_pid_cache()  # every running Dobby, not just ours
         self.panels: List[_Panel] = []
         self.primary_h = 0.0
         self.cursor: Optional[Tuple[float, float]] = None
@@ -1519,8 +1531,9 @@ class OverlayController:
             if self._event_tag(event) == DOBBY_EVENT_TAG:
                 return  # synthetic input from any Dobby process, not the person
             pid = self._event_pid(event)
-            if pid and pid in (self.server_pid, os.getpid()):
-                return  # Dobby's own synthetic input
+            if pid and (pid in (self.server_pid, os.getpid())
+                        or (self.agent_pids is not None and pid in self.agent_pids)):
+                return  # synthetic input from this or another Dobby agent, not the person
             etype = int(event.type())
             if etype == 10:  # NSEventTypeKeyDown
                 flags = int(event.modifierFlags()) & _HOTKEY_MODS

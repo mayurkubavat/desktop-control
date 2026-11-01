@@ -75,6 +75,8 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         cfg["color"] = env["DOBBY_OVERLAY_COLOR"]
     if env.get("DOBBY_OVERLAY_LABEL"):
         cfg["label"] = env["DOBBY_OVERLAY_LABEL"]
+    elif env.get("DOBBY_AGENT_NAME", "").strip():
+        cfg["label"] = env["DOBBY_AGENT_NAME"].strip()  # which agent this cursor belongs to
     if env.get("DOBBY_OVERLAY_CAPTURE_VISIBLE", "").strip().lower() in _FALSE:
         cfg["capture_visible"] = False
     resume = env.get("DOBBY_OVERLAY_RESUME", "").strip().lower()
@@ -141,7 +143,9 @@ def find_overlay_hal(hal: Any) -> Optional[OverlayHAL]:
     while hal is not None and seen < 5:
         if isinstance(hal, OverlayHAL):
             return hal
-        hal = getattr(hal, "__dict__", {}).get("backend")
+        attrs = getattr(hal, "__dict__", {})
+        # DesktopSession keeps .backend; wrappers such as ControlHAL keep ._inner.
+        hal = attrs.get("backend") or attrs.get("_inner")
         seen += 1
     return None
 

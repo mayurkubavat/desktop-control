@@ -2,7 +2,7 @@
 
 # Dobby MCP tools
 
-49 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
+53 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
 
 ## core
 
@@ -20,6 +20,10 @@
 | `hotkey` | `combo`, `verify_delta=True` | Sends a keyboard chord shortcut (e.g. 'ctrl+c', 'alt+tab', 'ctrl+a'). |
 | `ask_screen` | `question=''`, `region=None`, `expected_text=None` | Answers a yes/no question about the screen using the local Gemma model, without sending an image back to the client (zero image tokens). |
 | `read_screen_text` | `region=None`, `contains=None`, `regex=False`, `output_mode=None` | Reads text on screen with local OCR (Apple Vision on macOS, RapidOCR on Linux/Windows) and returns lines with boxes and click points. No image is returned, so this costs a few hundred text tokens instead of a screenshot. |
+| `control_status` | none | Shows which agent controls the desktop, how long, and who is waiting. |
+| `request_control` | `max_wait_s=None` | Waits (up to max_wait_s, default the server's max wait) and takes control. |
+| `release_control` | none | Gives up desktop control so a waiting agent can start at once. |
+| `hold_control` | `seconds=30.0` | Keeps control for up to `seconds` (capped) even while idle or past the slice. |
 
 ## window_mgmt
 

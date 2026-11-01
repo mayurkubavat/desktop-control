@@ -56,6 +56,15 @@ You plan; Dobby and local Gemma perceive and verify. Gemma never plans and never
 - Stay inside the app the user named; say so before touching another.
 - Stop and ask before anything irreversible: delete, send, publish, purchase, overwrite.
 
-## 5. Report
+## 5. Sharing the desktop with another agent
+
+Another AI may drive the same desktop through its own Dobby. Only one agent clicks or types at a time; reading the screen is always allowed.
+
+- "<name> has control of the desktop": wait or do non-desktop work, then retry. `control_status` shows who holds control and for how long.
+- "Another agent used the desktop since your last look": the step was skipped and you now hold control. Look again (AX tree or screenshot) before acting.
+- When a task is done, or before long planning, call `release_control` so the other agent can start at once.
+- For a flow that must not be interrupted (a wizard, a drag across windows), call `hold_control(seconds)` first.
+
+## 6. Report
 
 End with what was done, the verdict and tier of each critical step, anything left for the user, and how many screenshot images were used.

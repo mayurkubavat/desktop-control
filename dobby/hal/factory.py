@@ -104,6 +104,9 @@ def _build(kind: str, cassette: Path | str | None) -> DesktopSession:
         from dobby.overlay import wrap_hal
 
         backend = wrap_hal(backend)  # agent cursor + glow; no-op when disabled
+    from dobby.control import wrap_hal as wrap_control
+
+    backend = wrap_control(backend)  # shared lease between agents; no-op when disabled
     return DesktopSession(
         backend=backend,
         topology=_topology_for(backend),

@@ -46,7 +46,7 @@ Exit code 0 means every step passed.
 | `gemma_vision` | `ask_screen(question)`: Gemma looks at the pixels | ~1.5 s warm |
 | `dialog` | Triage agent classifies a new dialog; not benign stops the run | ~1-2 s |
 
-A model error or bad JSON counts as unsure, never as a pass.
+A model error or bad JSON counts as unsure, never as a pass. On a cassette without recorded images, `gemma_vision` always answers `blank_crop` (unsure), so rehearsals are decided by `ocr` and `gemma_text`.
 
 ## Reading the report
 

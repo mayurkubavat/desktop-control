@@ -199,6 +199,8 @@ class DesktopPlanAgent(BaseAgent):
                     holder = {}
                     async for ev in self._check(step, obs, ctx, holder):
                         yield ev
+                    for key in ("verdict", "ask_screen", "detail"):
+                        row.pop(key, None)  # report only the attempt that decided the step
                     row.update(holder["value"])
                     if row["status"] in ("passed", "failed"):
                         break

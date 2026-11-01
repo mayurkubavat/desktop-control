@@ -99,6 +99,17 @@ def test_ungrounded_pass_falls_to_vision_then_escalates():
     assert "Running synth_design" in report["observation"]
 
 
+def test_report_shows_only_the_deciding_attempt():
+    desk = FakeDesktop([["Idle"], ["Synthesis Completed"]])
+    plan = {"steps": [{"tool": "press_key", "args": {"key": "Return"}, "expect": {"question": "Done?"}, "retries": 1}]}
+    report, _ = _run(plan, desk, [
+        {"outcome": "unsure", "confidence": 0.0, "evidence": ""},
+        {"outcome": "pass", "confidence": 0.9, "evidence": "Synthesis Completed"},
+    ])
+    row = report["steps"][0]
+    assert row["status"] == "passed" and row["attempts"] == 2 and "ask_screen" not in row
+
+
 def test_vision_tier_can_pass():
     desk = FakeDesktop([["Idle"], ["Status"]])
     desk.ask_screen_reply = {"answer": True, "confidence": 0.9, "evidence": "green circle", "source": "gemma"}

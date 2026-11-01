@@ -1701,7 +1701,7 @@ class OverlayController:
         self.current_step = text
         self.steps.append(f"{self.step_no}. {text}")
         self.steps = self.steps[-10:]
-        self._refresh_menu()
+        self._refresh_pill()  # the bar shows the step and count; this also refreshes the menu
 
     # ------------------------------------------------------------- tracking
     def _window_list(self, option: int, wid: int = kCGNullWindowID) -> List[Dict[str, Any]]:

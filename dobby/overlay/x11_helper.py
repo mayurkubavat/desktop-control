@@ -48,7 +48,7 @@ gi.require_version("Gdk", "3.0")
 import cairo  # noqa: E402
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from . import geometry, protocol  # noqa: E402
+from . import geometry, protocol, style  # noqa: E402
 from .barlock import BAR_LOCK, BarOwner, mark_waiting, others_waiting, waiting_dir  # noqa: E402
 from .menu import bar_click, bar_view, label_click  # noqa: E402
 
@@ -235,14 +235,32 @@ class _Bar:
     def show(self, mode: str, text: str, primary: str, secondary: str, rgb, dot_alpha: float = 1.0) -> None:
         self.mode = mode
         self.text.set_text(text)
-        self.primary.set_label(primary)
-        self.secondary.set_label(secondary)
+        if primary:
+            self.primary.set_label(primary)
+        if secondary:
+            self.secondary.set_label(secondary)
         r, g, b = (int(v * 255) for v in rgb)
         self.dot.set_markup(f'<span foreground="#{r:02x}{g:02x}{b:02x}" alpha="{int(dot_alpha * 100)}%">●</span>')
         self.visible = True
         self.win.resize(1, 1)
         self._place()  # centre for the new text before mapping, so it does not jump
         self.win.show_all()
+
+    def show_spec(self, spec, rgb) -> None:
+        """Draw a style.BarSpec: its text, and only the buttons it asks for.
+
+        GTK has no SF Symbols, so icon buttons use text glyphs here.
+        """
+        glyphs = {"pause.fill": "⏸", "play.fill": "▶", "stop.fill": "■"}
+        wanted = {b.key: b for b in spec.buttons}
+        for key, btn in (("primary", self.primary), ("secondary", self.secondary)):
+            b = wanted.get(key)
+            if b is not None:
+                btn.set_label(glyphs.get(b.icon or "", b.title))
+                btn.set_tooltip_text(b.tip or None)
+        self.show(spec.mode, spec.text, "", "", rgb, dot_alpha=spec.dot_alpha)
+        self.primary.set_visible("primary" in wanted)
+        self.secondary.set_visible("secondary" in wanted)
 
     def hide(self, keep_mode: bool = False) -> None:
         if not keep_mode:
@@ -262,6 +280,14 @@ class X11Overlay:
 
         self.risk = "ok"
         self.state = "idle"
+        self.style = style.normalize_style(self.cfg.get("style"))
+        self.server_pid = int(os.environ.get("DOBBY_SERVER_PID", "0") or 0)
+        self.agents_next = 0.0
+        # The task in progress, for the bar's live step and timer.
+        self.task_started = 0.0
+        self.task_steps = 0
+        self.current_step = ""
+        self.bar_second = -1
         self.intent = ""
         self.intent_until = 0.0
         self.cursor: Optional[Tuple[float, float]] = None
@@ -582,10 +608,43 @@ class X11Overlay:
         mode, text, primary, secondary, color, dot_alpha = view
         rgb = {"ok": _rgb(self.cfg["color"]), "caution": _rgb(self.cfg["caution_color"]),
                "danger": _rgb(self.cfg["danger_color"])}.get(color) or self._color()
-        self.bar.show(mode, text, primary, secondary, rgb, dot_alpha=dot_alpha)
+        if self.style == "classic":
+            self.bar.show(mode, text, primary, secondary, rgb, dot_alpha=dot_alpha)
+            return
+        now = time.monotonic()
+        # No hover tracking here: the sleeping bar always shows its full text.
+        spec = style.bar_spec(view, hovered=True, label=str(self.cfg["label"]), step=self.current_step,
+                              steps=self.task_steps,
+                              elapsed=(now - self.task_started) if self.task_started else 0.0,
+                              turbo=bool(self.cfg.get("turbo")), thinking=self.state == "thinking")
+        self.bar.show_spec(spec, rgb)
+
+    def _refresh_agents(self) -> None:
+        """Take this Dobby's colour from the agent registry (modern look)."""
+        if (self.style != "modern" or not self.server_pid or self.cfg.get("color_fixed")
+                or not self.cfg.get("agent_colors", True)):
+            return
+        try:
+            from dobby.control import commands, control_root
+
+            own = style.agent_colors(commands.overview(control_root())).get(self.server_pid)
+        except Exception:  # noqa: BLE001 - colour is cosmetic
+            return
+        if own and own.upper() != str(self.cfg["color"]).upper():
+            self.cfg["color"] = own
+            self._apply_colors()
+            self._refresh_bar()
 
     def _bar_tick(self) -> bool:
         now = time.monotonic()
+        if now >= self.agents_next:
+            self.agents_next = now + 2.0
+            self._refresh_agents()
+        if self.style == "modern" and self.bar is not None and self.bar.mode == "working":
+            second = int(now - self.task_started)
+            if second != self.bar_second:  # the bar's timer
+                self.bar_second = second
+                self._refresh_bar()
         if self.bar is not None and not self.bar_owner.owned and now >= self.bar_owner_retry:
             self.bar_owner_retry = now + 2.0
             if self.bar_owner.try_acquire():
@@ -607,7 +666,12 @@ class X11Overlay:
         return True
 
     def _mark_active(self) -> None:
-        self.last_action = time.monotonic()
+        now = time.monotonic()
+        if now - self.last_action > float(self.cfg["active_secs"]):
+            self.task_started = now  # a new task: step count and timer start over
+            self.task_steps = 0
+            self.current_step = ""
+        self.last_action = now
         self.wake_pointer = False  # Dobby drives the pointer now
         if self.awake_until:
             self._end_awake()
@@ -871,6 +935,9 @@ class X11Overlay:
             self.quit()
 
     def _set_intent(self, text: str, ms: Optional[float] = None) -> None:
+        if text and text != "Stopped":
+            self.task_steps += 1
+            self.current_step = text
         self.intent = _short(text) if text else ""
         dur = float(ms if ms is not None else self.cfg["intent_ms"]) / 1000.0
         self.intent_until = time.monotonic() + dur if text else 0.0

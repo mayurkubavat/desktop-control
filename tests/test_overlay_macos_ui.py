@@ -27,7 +27,8 @@ def make(tmp_path):
 
     def _make(**cfg):
         out = io.StringIO()
-        base = {"bar_lock": str(tmp_path / "bar.lock")}
+        # The older tests below check the classic bar; modern tests ask for it.
+        base = {"bar_lock": str(tmp_path / "bar.lock"), "style": "classic"}
         base.update(cfg)
         c = mac_helper.OverlayController(base, out=out, interactive=False)
         c._claim_bar()
@@ -542,3 +543,95 @@ def test_picker_lists_dobbys_and_pauses_the_other(make, tmp_path, monkeypatch):
     assert c.paused
     c.target.menuAllResume_(None)
     assert not c.paused and commands.read(root, os.getppid())["paused"] is False
+
+
+# ------------------------------------------------------------ modern look
+def _modern(make, **cfg):
+    c, out = make(style="modern", **cfg)
+    _asleep(c)
+    return c, out
+
+
+def test_modern_sleeping_bar_is_compact_and_grows_on_hover(make):
+    c, _ = _modern(make)
+    assert c.pill.mode == "ready" and c.pill.spec.compact
+    assert c.pill.label.stringValue() == "Dobby"
+    assert c.pill.primary.isHidden() and c.pill.menu_btn.isHidden()
+    w0 = c.pill.window.frame().size.width
+    assert w0 < 120
+    c.on_pill_hover(True)
+    assert not c.pill.spec.compact and "click to wake" in c.pill.label.stringValue()
+    assert not c.pill.menu_btn.isHidden() and c.pill.primary.isHidden()
+    assert c.pill.window.frame().size.width > w0
+    c.on_pill_hover(False)
+    c._hover_settle()
+    assert c.pill.spec.compact
+
+
+def test_modern_bar_has_glass(make):
+    c, _ = _modern(make)
+    assert c.pill.backdrop is not None and c.pill.backdrop.superview() is c.pill.view
+
+
+def test_modern_working_bar_shows_step_and_timer_with_icons(make):
+    c, _ = _modern(make)
+    c.handle({"op": "intent", "text": "Click ‘Send’"})
+    text = c.pill.label.stringValue()
+    assert c.pill.mode == "working" and text.startswith("Click ‘Send’ · step 1 · 0:0")
+    assert c.pill.primary.image() is not None and c.pill.secondary.image() is not None
+    assert c.pill.secondary.toolTip().startswith("Stop")
+    assert not c.pill.menu_btn.isHidden()
+
+
+def test_modern_agent_colour_name_and_dots(make):
+    c, _ = _modern(make)
+    c.server_pid = 222
+    c._apply_agents([{"pid": 111, "name": "antigravity", "started": 1, "color": "#7C5CFF"},
+                     {"pid": 222, "name": "claude-code", "started": 2, "color": "#14B8A6", "holding": True}])
+    assert c.ok_hex == "#14B8A6" and c.agent_label == "Dobby · claude-code"
+    assert not c.pill.dots_btn.isHidden() and c.pill.dots_btn.image() is not None
+
+
+def test_modern_fixed_colour_ignores_registry(make):
+    c, _ = _modern(make, color="#00AA00", color_fixed=True)
+    c.server_pid = 222
+    c._apply_agents([{"pid": 222, "name": "x", "started": 1, "color": "#14B8A6"}])
+    assert c.ok_hex == "#00AA00"
+
+
+def test_modern_tag_flips_at_right_edge(make):
+    from AppKit import NSScreen
+
+    c, _ = _modern(make)
+    f = NSScreen.screens()[0].frame()
+    c.cursor = (f.size.width - 10, 200.0)
+    c._place_pointer(c.cursor, 0)
+    assert c.panels[0].flip == (True, False)
+    c.cursor = (300.0, 200.0)
+    c._place_pointer(c.cursor, 0)
+    assert c.panels[0].flip == (False, False)
+
+
+def test_modern_glow_follows_state(make):
+    c, _ = _modern(make)
+    c._place_glow((100.0, 100.0, 600.0, 400.0), 0)
+    c.glow_rect = (100.0, 100.0, 600.0, 400.0)
+    c._glow_sig = None
+    c._refresh_glow()
+    assert c.panels[0].glow.opacity() == 0.0  # idle: no glow
+    c._mark_active()
+    c._refresh_pill()
+    assert c.panels[0].glow.opacity() == 1.0
+    c.cursor_state = "thinking"
+    c._refresh_pill()
+    assert c.panels[0].sweep.opacity() > 0 or c.reduce_motion
+    c.set_paused(True)
+    assert c._glow_sig[0] == "halted"
+
+
+def test_modern_trail_keeps_three_dots(make):
+    c, _ = _modern(make)
+    c.cursor = (300.0, 300.0)
+    for _ in range(5):
+        c.handle({"op": "cursor.click", "count": 1})
+    assert len(c.panels[0].trail.sublayers() or []) == 3

@@ -125,7 +125,7 @@ def test_overlay_enabled_rules():
 
 def test_overlay_config():
     cfg = overlay_config({"DOBBY_OVERLAY_COLOR": "#00ff00", "DOBBY_OVERLAY_SPEED": "0", "DOBBY_OVERLAY_LABEL": "D"})
-    assert cfg == {"color": "#00ff00", "speed": 0.0, "label": "D"}
+    assert cfg == {"color": "#00ff00", "color_fixed": True, "speed": 0.0, "label": "D"}
     assert overlay_config({"DOBBY_OVERLAY_SPEED": "fast"}) == {}
     assert overlay_config({"DOBBY_OVERLAY_CAPTURE_VISIBLE": "0"}) == {"capture_visible": False}
     assert overlay_config({"DOBBY_OVERLAY_TURBO": "1", "DOBBY_OVERLAY_RESUME": "manual",

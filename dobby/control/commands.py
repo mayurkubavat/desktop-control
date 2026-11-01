@@ -81,6 +81,8 @@ def overview(root: Path) -> List[Dict[str, Any]]:
             "paused": read(root, pid)["paused"],
             "holding": pid == holder,
             "waiting": pid in waiting,
+            "started": float(rec.get("started", 0) or 0),
+            "color": rec.get("color"),
         })
     out.sort(key=lambda a: (a["name"].lower(), a["pid"]))
     return out

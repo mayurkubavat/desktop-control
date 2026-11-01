@@ -21,13 +21,38 @@ def agents_dir(root: Path) -> Path:
     return Path(root) / "agents"
 
 
-def register(root: Path, agent_id: str, name: str, pid: int, priority: int = 0) -> Path:
+def _pick_color(root: Path, pid: int) -> str:
+    """Keep this pid's colour on re-register; else the first one nobody uses."""
+    from dobby.overlay.style import pick_agent_color  # pure module, no GUI imports
+
+    taken = []
+    for rec in list_agents(root):
+        if int(rec.get("pid", 0) or 0) == pid and rec.get("color"):
+            return str(rec["color"])
+        taken.append(str(rec.get("color") or ""))
+    return pick_agent_color(taken)
+
+
+def register(root: Path, agent_id: str, name: str, pid: int, priority: int = 0,
+             color: Optional[str] = None) -> Path:
+    """Write ``agents/<pid>.json``. ``color`` is this Dobby's overlay colour:
+    by default the first palette colour no other running Dobby uses."""
     d = agents_dir(root)
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{pid}.json"
     tmp = d / f".{pid}.tmp"
+    started = time.time()
+    try:
+        prev = json.loads(path.read_text(encoding="utf-8"))
+        started = float(prev.get("started", started))
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    try:
+        color = color or _pick_color(root, pid)
+    except Exception:  # noqa: BLE001 - a colour is cosmetic
+        color = None
     tmp.write_text(json.dumps({"id": agent_id, "name": name, "pid": pid, "priority": priority,
-                               "started": time.time()}), encoding="utf-8")
+                               "started": started, "color": color}), encoding="utf-8")
     os.replace(tmp, path)
     return path
 

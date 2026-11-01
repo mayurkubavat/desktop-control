@@ -23,6 +23,13 @@ Resume), ``DOBBY_OVERLAY_TRAIL=0`` hides the numbered step trail,
 Allow/Deny prompts for risky steps and no pause when you touch the mouse or
 keyboard; only Stop / Pause halt Dobby.
 
+Look: ``DOBBY_OVERLAY_STYLE=modern`` (default: compact sleeping bar that
+grows on hover, icon buttons, frosted glass, live step and timer while
+working, one colour per running Dobby, a glow that follows Dobby's state and
+the window's corners, a short fading trail, a tag that flips away from screen
+edges) or ``classic`` (the earlier look). ``DOBBY_OVERLAY_AGENT_COLORS=0``
+keeps every Dobby violet; ``DOBBY_OVERLAY_COLOR`` fixes one colour.
+
 Click the sleeping control bar to wake Dobby. If the AI waits in the
 ``wait_for_wake`` tool, that call returns and the bar says it hands back to
 the AI (until its next action, or ``DOBBY_OVERLAY_AWAKE_SECS``, default 120).
@@ -77,6 +84,12 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {}
     if env.get("DOBBY_OVERLAY_COLOR"):
         cfg["color"] = env["DOBBY_OVERLAY_COLOR"]
+        cfg["color_fixed"] = True  # no per-Dobby colour from the registry
+    look = env.get("DOBBY_OVERLAY_STYLE", "").strip().lower()
+    if look in ("modern", "classic"):
+        cfg["style"] = look
+    if env.get("DOBBY_OVERLAY_AGENT_COLORS", "").strip().lower() in _FALSE:
+        cfg["agent_colors"] = False
     if env.get("DOBBY_OVERLAY_LABEL"):
         cfg["label"] = env["DOBBY_OVERLAY_LABEL"]
     elif env.get("DOBBY_AGENT_NAME", "").strip():

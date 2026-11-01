@@ -417,20 +417,24 @@ def test_control_bar_sleep_wake_pause_stop(hal, overlay):
 
     _click(hal, sleeping)  # click the bar: wake
     assert _wait_for(lambda: overlay.awake, timeout=3)
-    awake = _bar_label(insp, "ready for a task")
+    awake = _bar_label(insp, "Dobby is awake")
     assert awake is not None
     _click(hal, awake)  # click again: back to sleep
     assert _wait_for(lambda: not overlay.awake, timeout=3)
+    # Nothing runs while Dobby sleeps, so the bar has no Pause or Stop then.
+    assert not any(e.name in ("Pause", "⏸", "Stop", "■") for e in _bar_items(insp))
 
-    pause = _wait_for(lambda: next((e for e in _bar_items(insp) if e.name == "Pause"), None))
+    assert overlay.move(700, 500, verb="Click")  # working: pause (⏸) and stop (■)
+    assert _bar_label(insp, "Click · step 1") is not None  # waits for the bar to re-centre
+    pause = next(e for e in _bar_items(insp) if e.name == "⏸")
     _click(hal, pause)
     assert _wait_for(lambda: overlay._paused, timeout=3)
     assert _bar_label(insp, "Dobby is paused") is not None
-    resume = next(e for e in _bar_items(insp) if e.name == "Resume")
+    resume = next(e for e in _bar_items(insp) if e.name == "▶")
     _click(hal, resume)
     assert _wait_for(lambda: not overlay._paused, timeout=3)
 
-    stop = _wait_for(lambda: next((e for e in _bar_items(insp) if e.name == "Stop"), None))
+    stop = _wait_for(lambda: next((e for e in _bar_items(insp) if e.name == "■"), None))
     _click(hal, stop)
     assert _bar_label(insp, "Dobby stopped") is not None
     assert _wait_for(lambda: overlay._stop_requested, timeout=3)
@@ -443,7 +447,7 @@ def test_control_bar_working_and_hidden_for_capture(hal, overlay):
     if not insp.is_available:
         pytest.skip("AT-SPI unavailable")
     assert overlay.move(700, 500, verb="Click")
-    working = _bar_label(insp, "Dobby is working")
+    working = _bar_label(insp, "Click · step 1 · 0:0")  # live step, step count and timer
     assert working is not None
     b = working.bbox
     before = hal.capture_screen().crop((b.x, b.y, b.x + b.width, b.y + b.height))

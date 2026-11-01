@@ -182,8 +182,41 @@ ADK_TRIAGE = PromptSpec(
     max_tokens=150,
 )
 
+
+# ------------------------------------------------------- logit-scored decisions
+# These prompts are answered with one token whose log-probabilities are read
+# (vision_mcp.gemma.decide), so they carry no JSON schema.
+
+YES_NO_LOGPROB = PromptSpec(
+    id="yes_no_logprob",
+    version=1,
+    system=(
+        "You check the state of a desktop application from a screenshot crop.\n"
+        "Decide whether the statement in the question is true, based only on what is visible.\n"
+        "If the thing asked about is visible but differs (another color, another state, a dialog still open), "
+        "the answer is no. If the crop is blank, cut off or does not show it, lean neither way.\n"
+        "Reply with exactly one word: yes or no."
+    ),
+    schema={},
+    max_tokens=1,
+)
+
+DECIDE_CHOICE = PromptSpec(
+    id="decide_choice",
+    version=1,
+    system=(
+        "You choose the single best option for a desktop automation step.\n"
+        "Read the goal, the screen state and the options. Options are labelled with capital letters.\n"
+        "Reply with exactly one capital letter and nothing else.\n"
+        "If no option fits the goal, choose the option that says none of these."
+    ),
+    schema={},
+    max_tokens=1,
+)
+
 PROMPTS: Dict[str, PromptSpec] = {
-    p.id: p for p in (YES_NO, MODAL_TRIAGE, MARK_LABEL, MARK_FIND, GROUND_ROI, COMPRESS, ADK_VERIFIER, ADK_TRIAGE)
+    p.id: p for p in (YES_NO, MODAL_TRIAGE, MARK_LABEL, MARK_FIND, GROUND_ROI, COMPRESS, ADK_VERIFIER, ADK_TRIAGE,
+              YES_NO_LOGPROB, DECIDE_CHOICE)
 }
 
 

@@ -75,6 +75,41 @@ def _model_matches(wanted: str, installed: Iterable[str]) -> bool:
     return any(name in candidates for name in installed)
 
 
+def first_token_logprobs(raw: Dict[str, Any]) -> Optional[List[tuple]]:
+    """
+    The first generated token's alternatives as ``[(token, logprob), ...]``.
+
+    Reads Ollama's ``logprobs`` list (``[{token, logprob, top_logprobs: [...]}, ...]``)
+    and, for OpenAI-compatible servers, ``choices[0].logprobs.content``. Returns
+    None when the reply carries no logprobs at all.
+    """
+    entries = raw.get("logprobs")
+    if entries is None:
+        try:
+            entries = raw["choices"][0]["logprobs"]["content"]
+        except (KeyError, IndexError, TypeError):
+            entries = None
+    if isinstance(entries, dict):  # some servers wrap the list
+        entries = entries.get("content")
+    if not entries or not isinstance(entries, list):
+        return None
+    first = entries[0] if isinstance(entries[0], dict) else {}
+    alts = first.get("top_logprobs") or []
+    out: List[tuple] = []
+    for alt in alts:
+        if isinstance(alt, dict) and "token" in alt and "logprob" in alt:
+            try:
+                out.append((str(alt["token"]), float(alt["logprob"])))
+            except (TypeError, ValueError):
+                continue
+    if not out and "token" in first and "logprob" in first:
+        try:
+            out.append((str(first["token"]), float(first["logprob"])))
+        except (TypeError, ValueError):
+            pass
+    return out or None
+
+
 @dataclass
 class _ModelStats:
     calls: int = 0
@@ -202,6 +237,55 @@ class GemmaClient:
             if not isinstance(parsed, dict):
                 raise GemmaError(f"reply is not a JSON object: {content[:200]!r}")
             return parsed
+        except GemmaError as exc:
+            error = str(exc)
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            raise GemmaError(error) from exc
+        finally:
+            self._record(model, (time.perf_counter() - start) * 1000.0, error)
+
+    def chat_logprobs(
+        self,
+        model: str,
+        system: str,
+        user: str,
+        images: Optional[List[str]] = None,
+        top_logprobs: int = 20,
+        timeout: Optional[float] = None,
+        max_tokens: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        Sends one chat turn asking for the first token's log-probabilities.
+
+        Returns ``{"content": str, "top": [(token, logprob), ...] or None}``.
+        ``top`` is None when this Ollama does not return logprobs (older than
+        the release that added them), so callers can fall back. Raises
+        :class:`GemmaError` on transport errors or a missing model.
+        """
+        user_msg: Dict[str, Any] = {"role": "user", "content": user}
+        if images:
+            user_msg["images"] = list(images)
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "system", "content": system}, user_msg],
+            "stream": False,
+            "logprobs": True,
+            "top_logprobs": int(max(1, min(20, top_logprobs))),
+            "options": {"temperature": 0.0, "num_predict": int(max_tokens)},
+        }
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+
+        start = time.perf_counter()
+        error: Optional[str] = None
+        try:
+            if not self.has_model(model):
+                raise GemmaError(f"model '{model}' is not installed in Ollama at {self.base_url}")
+            raw = self._transport("POST", f"{self.base_url}/api/chat", payload, timeout or self.timeout)
+            content = str((raw.get("message") or {}).get("content", ""))
+            return {"content": content, "top": first_token_logprobs(raw)}
         except GemmaError as exc:
             error = str(exc)
             raise

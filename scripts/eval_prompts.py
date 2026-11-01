@@ -11,6 +11,7 @@ latency. Compare two runs to decide whether a prompt or model change helps.
     python scripts/eval_prompts.py --cases my_cases.jsonl      # your own crops
     python scripts/eval_prompts.py --synthetic --ocr-context   # also show Gemma the OCR text
     python scripts/eval_prompts.py --synthetic --prompt-dir ~/try-prompts   # yes_no.txt override
+    python scripts/eval_prompts.py --synthetic --logprobs      # p_yes from token logprobs
 
 A cases file has one JSON object per line; image paths are relative to the file:
 
@@ -122,6 +123,8 @@ def main() -> int:
     ap.add_argument("--no-ocr", action="store_true", help="no OCR at all: evidence is not checked")
     ap.add_argument("--ocr-context", action="store_true", help="also show Gemma the OCR text (CONFIG.gemma3_ocr_context)")
     ap.add_argument("--prompt-dir", help="folder with <prompt_id>.txt overrides to evaluate")
+    ap.add_argument("--logprobs", action="store_true",
+                    help="answer from Gemma's yes/no token probabilities (CONFIG.gemma3_yes_no_logprobs)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--json", action="store_true", help="print the full report as JSON")
     args = ap.parse_args()
@@ -133,6 +136,8 @@ def main() -> int:
 
     if args.prompt_dir is not None:
         CONFIG.gemma3_prompt_dir = args.prompt_dir
+    if args.logprobs:
+        CONFIG.gemma3_yes_no_logprobs = True
     cases = []
     if args.synthetic:
         cases += synthetic_cases(args.synthetic_dir)
@@ -175,12 +180,14 @@ def main() -> int:
                 "got": got, "confidence": round(res["confidence"], 2), "outcome": outcome,
                 "evidence": res["evidence"], "evidence_type": res.get("evidence_type"),
                 "evidence_verified": res.get("evidence_verified"), "ms": round(ms),
+                "p_yes": res.get("p_yes"), "source": res["source"],
             })
 
     n = len(rows)
     count = lambda k: sum(1 for r in rows if r["outcome"] == k)  # noqa: E731
     report = {
-        "prompt": get_prompt("yes_no").tag,
+        "prompt": get_prompt("yes_no_logprob" if args.logprobs else "yes_no").tag,
+        "logprob_answers": sum(1 for r in rows if r["source"] == "gemma_logprobs"),
         "model": gemma.vision_model,
         "ocr_verify": ocr is not None,
         "ocr_context": ocr is not None and args.ocr_context,

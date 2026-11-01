@@ -205,6 +205,15 @@ class VisionConfig(BaseModel):
         default=0.5,
         description="Confidence cap when Gemma quotes text as evidence that OCR cannot find in the crop.",
     )
+    gemma3_yes_no_logprobs: bool = Field(
+        default=False,
+        description="Answer yes/no checks by reading Gemma's yes/no token probabilities (one token, calibrated "
+        "p_yes) instead of a generated JSON answer. Needs an Ollama that returns logprobs; falls back otherwise.",
+    )
+    gemma3_yes_band: float = Field(
+        default=0.7,
+        description="Logprob yes/no: p_yes at or above this is yes, at or below 1 - this is no, between is unsure.",
+    )
     gemma3_timeout_seconds: float = Field(
         default=25.0,
         description="Maximum timeout in seconds for local Gemma 3 inference requests.",

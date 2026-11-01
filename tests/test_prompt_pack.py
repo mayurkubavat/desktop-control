@@ -36,7 +36,7 @@ def _ask(reply, ocr=None):
 
 
 def test_registry_has_every_gemma_call():
-    assert set(PROMPTS) == {"yes_no", "modal_triage", "mark_label", "mark_find", "ground_roi", "compress_history", "adk_verifier", "adk_triage"}
+    assert set(PROMPTS) == {"yes_no", "modal_triage", "mark_label", "mark_find", "ground_roi", "compress_history", "adk_verifier", "adk_triage", "yes_no_logprob", "decide_choice"}
     assert get_prompt("yes_no", prompt_dir="").tag == "yes_no@4"
     assert all(p["system"] for p in list_prompts())
 

@@ -13,6 +13,7 @@ Pick the cheapest source that can answer the question. Each step down costs more
 | A label you can name | `find_element(query, role)` / `find_and_click(query)` | 0 image tokens | Label is an icon or drawn text |
 | Text and where it is | `read_screen_text(contains=...)` | ~220 ms on Apple Vision, cached repeats under 1 ms | Text is tiny, rotated or inside images |
 | A yes/no about the screen | `ask_screen(question, expected_text=...)` | OCR first; Gemma ~1.2 s warm, ~8 s cold | Question needs reasoning over many items |
+| Pick one of known candidates | `choose_option(goal, options, verb=...)` | One Gemma token, probabilities from logprobs | Options are not known yet (look first) |
 | An unnamed icon | `find_visual_element(description)` | One Gemma call over numbered boxes | No detector box around the target |
 | Layout of a window | `take_screenshot(mode="annotated_som")` | Marks + URI, no image | Very dense UIs (marks overlap) |
 | Appearance itself | `take_screenshot(include_image=true)` | ~1,500 image tokens per window | Never; it is the fallback |
@@ -22,6 +23,7 @@ Rules that hold for every rung:
 - Gemma names and judges; it never returns coordinates. Clicks use AX boxes, OCR boxes or mark ids.
 - OCR output on a busy window can cost more tokens than the screenshot (3,714 vs 1,533 on the Claude window). Always pass `contains` or a `region`.
 - `ask_screen` returns `answer` (true, false or null), `confidence`, `evidence` and `source` (ocr, gemma or fallback). A null answer means neither OCR nor Gemma could decide; escalate instead of guessing.
+- `choose_option` returns a `gate.verdict`: act only on "act". "escalate" means decide yourself, "stop" means do not act (consequential verb like send or delete without `authorized=true`, or below threshold). It is in the advanced_vision toolset.
 - Electron apps (Claude, VS Code, Slack) expose their full UI in the AX tree after the first inspection; if the tree is only window buttons, call again once.
 
 ## References (read when needed)

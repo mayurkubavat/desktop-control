@@ -437,6 +437,10 @@ class Gemma3Grounder:
             # Nothing on screen to judge: gemma3:4b answers a confident "no" here (eval_prompts blank.png).
             return {**base, "answer": None, "confidence": 0.0, "evidence": "blank crop", "source": "blank_crop"}
         crop = _fit_image(image, CONFIG.gemma3_visual_max_side)
+        if CONFIG.gemma3_yes_no_logprobs:
+            scored = self._yes_no_logprob(crop, question, ocr_lines, timeout)
+            if scored is not None:
+                return scored
         try:
             data = self.client.chat_json(
                 model=self.vision_model,
@@ -480,6 +484,58 @@ class Gemma3Grounder:
             if not verified:
                 result["confidence"] = min(confidence, CONFIG.gemma3_unverified_text_cap)
         return result
+
+    def decider(self, timeout: Optional[float] = None):
+        """A :class:`~vision_mcp.gemma.decide.GemmaDecider` on this grounder's vision model."""
+        from vision_mcp.gemma.decide import GemmaDecider
+
+        return GemmaDecider(self.client, model=self.vision_model, timeout=timeout or self.timeout)
+
+    def _yes_no_logprob(
+        self,
+        crop: Image.Image,
+        question: str,
+        ocr_lines: Optional[List[str]],
+        timeout: Optional[float],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Yes/no from Gemma's token probabilities (prompt ``yes_no_logprob``).
+
+        Returns None when this Ollama gives no logprobs or Gemma is unreachable,
+        so :meth:`ask_yes_no` falls back to the generated JSON answer.
+        """
+        from vision_mcp.gemma.prompts import get_prompt
+
+        spec = get_prompt("yes_no_logprob")
+        lines = [ln.strip() for ln in (ocr_lines or []) if ln and ln.strip()][:40]
+        state = "The screenshot crop is attached."
+        if lines:
+            state += "\nOCR text in this crop:\n" + "\n".join(f"- {ln}" for ln in lines)
+        try:
+            noul = self.decider(timeout).noul(
+                state,
+                question,
+                images=[encode_image(crop, quality=90)],
+                question_id="yes_no_logprob",
+                system=spec.system,
+            )
+        except GemmaError:
+            return None
+        if not noul.calibrated:
+            return None
+        band = CONFIG.gemma3_yes_band
+        answer = noul.answer(yes_at=band, no_at=1.0 - band)
+        return {
+            "prompt": spec.tag,
+            "answer": answer,
+            "confidence": round(noul.confidence, 4) if answer is not None else 0.0,
+            "p_yes": round(noul.p_true, 4),
+            "coverage": round(noul.coverage, 4),
+            "evidence": f"p_yes={noul.p_true:.2f}",
+            "evidence_type": "none" if answer is None else "visual",
+            "evidence_verified": None,
+            "source": "gemma_logprobs",
+        }
 
     def evaluate_step(
         self,

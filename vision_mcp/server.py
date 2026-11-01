@@ -124,6 +124,7 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "configure_vision": ("advanced_vision", "Configures runtime vision parameters"),
     "get_vision_diagnostics": ("advanced_vision", "Returns perception system health"),
     "ask_screen": ("core", "Answers visual questions via OCR/Gemma"),
+    "choose_option": ("advanced_vision", "Local Gemma picks one option with calibrated probabilities, gated by risk"),
     "read_screen_text": ("core", "Extracts screen text via local OCR"),
     "find_visual_element": ("advanced_vision", "Finds visual elements without accessibility names"),
     # Plugins
@@ -823,6 +824,56 @@ def ask_screen(
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
     return controller.ask_screen(question, region=reg_tuple, expected_text=expected_text)
+
+
+@mcp_server.tool()
+def choose_option(
+    goal: str,
+    options: List[str],
+    question: str = "Which option best advances the goal?",
+    state: str = "",
+    verb: str = "click",
+    authorized: bool = False,
+    shortlist_to: int = 12,
+) -> Dict[str, Any]:
+    """
+    Asks the local Gemma model to pick one of ``options`` and gates the answer by risk
+    (Jev-style typed decision: no text is generated, probabilities come from logprobs).
+
+    Use it for cheap, fast choices among known candidates (which element to click,
+    which menu item, which window) and act only when ``gate.verdict`` is "act".
+    "escalate" means decide yourself; "stop" means do not act (consequential action
+    below threshold or without authorization, unknown verb).
+
+    Args:
+        goal: What the user wants done.
+        options: Candidate labels (element names, menu items). Long lists are
+            shortlisted by word overlap with the goal; "None of these" is added.
+        question: The decision to make.
+        state: Optional screen context (window title, focused element, OCR lines).
+        verb: Action the choice leads to (click, type, scroll, send, delete, ...): sets the risk tier.
+        authorized: True only when the user explicitly asked for this consequential action.
+        shortlist_to: Maximum options shown to Gemma (<= 25).
+
+    Returns:
+        {decision: {choice, p, confidence, margin, coverage, calibrated, probabilities},
+         gate: {verdict, reason, risk}, shortlisted: bool}
+    """
+    from vision_mcp.gemma.decide import GemmaError, shortlist
+    from vision_mcp.gemma.gate import gate
+
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if grounder is None:
+        return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
+    k = max(1, min(25, int(shortlist_to)))
+    picked = shortlist(goal, list(options), k=k) if len(options) > k else list(options)
+    ctx = f"Goal: {goal.strip()}" + (f"\nScreen state:\n{state.strip()}" if state.strip() else "")
+    try:
+        decision = grounder.decider().choose(ctx, question, picked)
+    except (GemmaError, ValueError) as e:
+        return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
+    result = gate(decision, verb, authorized=authorized)
+    return {"decision": decision.as_dict(), "gate": result.as_dict(), "shortlisted": len(picked) < len(options)}
 
 
 @mcp_server.tool()

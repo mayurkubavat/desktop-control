@@ -61,7 +61,7 @@ def _urllib_transport(method: str, url: str, body: Optional[Dict[str, Any]], tim
         url,
         data=data,
         method=method,
-        headers={"Content-Type": "application/json", "User-Agent": "desktop-control"},
+        headers={"Content-Type": "application/json", "User-Agent": "dobby"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))

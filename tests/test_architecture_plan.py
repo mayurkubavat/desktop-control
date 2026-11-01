@@ -1,4 +1,4 @@
-"""Contracts added by the desktop-control architecture plan."""
+"""Contracts added by the dobby architecture plan."""
 
 import json
 from pathlib import Path
@@ -114,7 +114,7 @@ def test_resource_mode_omits_filesystem_path(tmp_path: Path):
     result = mgr.format_output("capture_vdom", payload)
     assert result["offloaded"] is True
     assert "file_path" not in result
-    assert result["uri"].startswith("mcp://desktop-control/state/")
+    assert result["uri"].startswith("mcp://dobby/state/")
     name = result["uri"].rsplit("/", 1)[-1]
     text = mgr.resolve_state_file(name).read_text(encoding="utf-8")
     assert "Run Synthesis" in text
@@ -154,7 +154,7 @@ def test_default_screenshot_is_marks_not_pixels():
     assert res["marks"] == [{"id": 1, "role": "push_button", "name": "Run", "center": [9, 10]}]
     assert res["image_offloaded"] is True
     assert "image_base64" not in res
-    assert str(res["uri"]).startswith("mcp://desktop-control/state/")
+    assert str(res["uri"]).startswith("mcp://dobby/state/")
     inline = server._screenshot_summary(payload, include_image=True)
     assert inline["image_base64"] == "abc"
 

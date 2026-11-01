@@ -9,4 +9,4 @@ build/
 .cache/
 references/
 # Skill references are part of the skills plugin
-!plugins/desktop-control/skills/*/references/
+!plugins/dobby/skills/*/references/

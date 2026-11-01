@@ -1,6 +1,6 @@
 """Versioned prompt pack for the local Gemma checker.
 
-Every Gemma call in desktop-control takes its system prompt, JSON schema and
+Every Gemma call in dobby takes its system prompt, JSON schema and
 token budget from here, so a prompt change is one diff, carries a version, and
 can be measured with ``scripts/eval_prompts.py`` before it lands.
 

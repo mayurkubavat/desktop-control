@@ -193,7 +193,7 @@ class VisionConfig(BaseModel):
         description="Load the Gemma vision model in the background when the server starts, so the first check is warm.",
     )
     gemma3_prompt_dir: Optional[str] = Field(
-        default="~/.desktop-control/prompts",
+        default="~/.dobby/prompts",
         description="Folder of local prompt overrides: <prompt_id>.txt replaces that prompt's system text.",
     )
     gemma3_ocr_context: bool = Field(
@@ -325,7 +325,7 @@ class VisionConfig(BaseModel):
         description="Default active toolset profile: 'minimal_computer_use', 'window_mgmt', 'full_developer', 'eda_automation'.",
     )
     cassette_dir: str = Field(
-        default="~/.desktop-control/cassettes",
+        default="~/.dobby/cassettes",
         description="Where start_cassette_recording writes recorded cassettes (one folder per name).",
     )
     state_dir: Optional[str] = Field(

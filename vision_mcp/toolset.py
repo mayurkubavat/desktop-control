@@ -24,7 +24,7 @@ class OutputMode(str, Enum):
 
     INLINE = "inline"        # Return full dictionary directly inside MCP response
     FILE = "file"            # Offload heavy payloads to tmpfs file, return URI & preview
-    RESOURCE = "resource"    # Expose as mcp://desktop-control/state/<id> pointer
+    RESOURCE = "resource"    # Expose as mcp://dobby/state/<id> pointer
 
 
 class ToolDefinition(BaseModel):
@@ -296,7 +296,7 @@ class ToolSetManager:
                 str(item.get("name", item))[:60] for item in payload["nodes"][:3]
             ]
 
-        uri = f"mcp://desktop-control/state/{filename}"
+        uri = f"mcp://dobby/state/{filename}"
         header = {
             "ok": True,
             "window": payload.get("active_window") or payload.get("window_title") or "",

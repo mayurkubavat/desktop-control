@@ -169,7 +169,7 @@ def test_toolset_manager_out_of_band_file_offloading(tmp_path):
     assert res_large.get("offloaded") is True
     assert res_large.get("output_mode") == "file"
     assert "resource_uri" in res_large
-    assert res_large["resource_uri"].startswith("mcp://desktop-control/state/")
+    assert res_large["resource_uri"].startswith("mcp://dobby/state/")
     assert "file_path" in res_large
     assert Path(res_large["file_path"]).exists()
     assert res_large["estimated_tokens_saved"] > 0

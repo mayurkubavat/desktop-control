@@ -2,7 +2,7 @@
 """Replay one or more cassettes and print a pass/fail line for each.
 
     python scripts/replay_cassette.py tests/cassettes/example_click
-    python scripts/replay_cassette.py --all ~/.desktop-control/cassettes
+    python scripts/replay_cassette.py --all ~/.dobby/cassettes
 """
 
 from __future__ import annotations

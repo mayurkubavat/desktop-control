@@ -1,7 +1,7 @@
 """
-Builds the generated references of the desktop-control skills plugin.
+Builds the generated references of the dobby skills plugin.
 
-Two kinds of files under plugins/desktop-control/skills/*/references/:
+Two kinds of files under plugins/dobby/skills/*/references/:
 
 * Generated from code: the MCP tool reference (from vision_mcp/server.py, read
   with ast so no desktop backend starts) and each app plugin's feature catalog.
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ROOT / "plugins" / "desktop-control" / "skills"
+SKILLS = ROOT / "plugins" / "dobby" / "skills"
 
 # skill -> [(reference file name, source path relative to ROOT)]
 COPIED: Dict[str, List[tuple]] = {
@@ -108,7 +108,7 @@ def tools_reference() -> str:
         domain = domains.get(fn.name, ("unregistered", ""))[0]
         by_domain.setdefault(domain, []).append(fn)
     order = ["core", "window_mgmt", "developer", "advanced_vision", "vdom", "skills", "plugins", "unregistered"]
-    out = [HEADER.format(src="vision_mcp/server.py"), "# desktop-control MCP tools\n\n",
+    out = [HEADER.format(src="vision_mcp/server.py"), "# dobby MCP tools\n\n",
            f"{len(tools)} tools. Only `core` is on by default; enable others with "
            "`manage_toolsets(action=\"enable\", domains=[...])`.\n"]
     for domain in sorted(by_domain, key=lambda d: order.index(d) if d in order else len(order)):

@@ -1,4 +1,4 @@
-"""ADK agent pipeline for desktop-control (optional; ``pip install -e '.[adk]'``).
+"""ADK agent pipeline for dobby (optional; ``pip install -e '.[adk]'``).
 
 Deterministic code runs the desktop tools; local Gemma only judges, through ADK
 ``LlmAgent``s with an ``output_schema`` (which turns tools off for them). The

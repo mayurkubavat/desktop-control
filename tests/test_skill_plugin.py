@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "desktop-control"
+PLUGIN = ROOT / "plugins" / "dobby"
 SKILLS = PLUGIN / "skills"
 
 
@@ -23,9 +23,9 @@ def _frontmatter(text: str) -> dict:
 
 def test_manifests_are_valid():
     plugin = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
-    assert plugin["name"] == "desktop-control"
+    assert plugin["name"] == "dobby"
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
-    entry = next(p for p in market["plugins"] if p["name"] == "desktop-control")
+    entry = next(p for p in market["plugins"] if p["name"] == "dobby")
     assert (ROOT / entry["source"]).resolve() == PLUGIN.resolve()
 
 

@@ -54,7 +54,7 @@ def _notify_tools_changed() -> None:
     return session.send_tool_list_changed()
 
 
-class DesktopControlServer(MCPServer):
+class DobbyServer(MCPServer):
     """MCP server whose tools/list follows the active domain profile."""
 
     active_session: Any = None
@@ -76,7 +76,7 @@ class DesktopControlServer(MCPServer):
         return await super().call_tool(name, arguments, context)
 
 
-mcp_server = DesktopControlServer("desktop-control")
+mcp_server = DobbyServer("dobby")
 hal = get_desktop_hal()
 controller = FeedbackLoopController(hal)
 trajectory_engine = TrajectoryEngine(controller)
@@ -1618,7 +1618,7 @@ def main():
     mcp_server.run()
 
 
-@mcp_server.resource("mcp://desktop-control/state/{name}")
+@mcp_server.resource("mcp://dobby/state/{name}")
 def read_state_resource(name: str) -> str:
     """Reads an offloaded state artifact. Names cannot escape the state directory."""
     return toolset_manager.resolve_state_file(name).read_text(encoding="utf-8")

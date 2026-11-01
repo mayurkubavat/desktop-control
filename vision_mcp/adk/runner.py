@@ -243,10 +243,10 @@ async def run_plan(plan: Plan, backend: DesktopBackend, model: Any, sleep: Any =
     )
     agent.sub_agents = [agent.verifier, agent.triage]
     sessions = InMemorySessionService()
-    session = await sessions.create_session(app_name="desktop_control", user_id="local", state={})
-    runner = Runner(app_name="desktop_control", agent=agent, session_service=sessions)
+    session = await sessions.create_session(app_name="dobby", user_id="local", state={})
+    runner = Runner(app_name="dobby", agent=agent, session_service=sessions)
     msg = types.Content(role="user", parts=[types.Part(text=plan.goal or plan.name)])
     async for _ in runner.run_async(user_id="local", session_id=session.id, new_message=msg):
         pass
-    session = await sessions.get_session(app_name="desktop_control", user_id="local", session_id=session.id)
+    session = await sessions.get_session(app_name="dobby", user_id="local", session_id=session.id)
     return dict(session.state.get("report") or {"status": "error", "reason": "no report"})

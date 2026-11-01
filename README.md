@@ -1,8 +1,8 @@
-# Desktop Control
+# Dobby
 
 A Model Context Protocol (MCP) server for desktop automation, screen perception, and window management on Linux, Windows and macOS.
 
-`desktop-control` lets AI coding assistants and autonomous agents (such as Antigravity, Claude, and Gemini) interact with graphical desktop applications. It provides tools for screen capture, mouse and keyboard control, UI element detection, window management, and executing multi-step action scripts.
+`dobby` lets AI coding assistants and autonomous agents (such as Antigravity, Claude, and Gemini) interact with graphical desktop applications. It provides tools for screen capture, mouse and keyboard control, UI element detection, window management, and executing multi-step action scripts.
 
 ---
 
@@ -31,8 +31,8 @@ A Model Context Protocol (MCP) server for desktop automation, screen perception,
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-org>/desktop-control.git
-cd desktop-control
+git clone https://github.com/<your-org>/dobby.git
+cd dobby
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -70,15 +70,15 @@ pytest tests/
 
 ## MCP Client Configuration
 
-Add `desktop-control` to your MCP client configuration file:
+Add `dobby` to your MCP client configuration file:
 
 ### Claude Desktop (`~/.config/Claude/claude_desktop_config.json`)
 
 ```json
 {
   "mcpServers": {
-    "desktop-control": {
-      "command": "/path/to/desktop-control/.venv/bin/desktop-control",
+    "dobby": {
+      "command": "/path/to/dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":0"
       }
@@ -92,8 +92,8 @@ Add `desktop-control` to your MCP client configuration file:
 ```json
 {
   "mcpServers": {
-    "desktop-control": {
-      "command": "/path/to/desktop-control/.venv/bin/desktop-control",
+    "dobby": {
+      "command": "/path/to/dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":20"
       }
@@ -153,7 +153,7 @@ Add `desktop-control` to your MCP client configuration file:
 | `list_crystallized_skills` | Lists all saved crystallized skills. |
 | `delete_crystallized_skill` | Deletes a saved skill. |
 | `start_cassette_recording` | Records each input action plus AX, OCR and window state as a replayable cassette. |
-| `stop_cassette_recording` | Writes the cassette to `~/.desktop-control/cassettes/<name>/index.json`. |
+| `stop_cassette_recording` | Writes the cassette to `~/.dobby/cassettes/<name>/index.json`. |
 
 ### Plugins & Utilities
 | Tool | Description |
@@ -173,7 +173,7 @@ Add `desktop-control` to your MCP client configuration file:
 ## Directory Structure
 
 ```
-desktop-control/
+dobby/
 ├── vision_mcp/             # Main Python package
 │   ├── hal/                # Hardware Abstraction Layer (Linux X11/Wayland, Windows)
 │   ├── perception/         # Screen capture, AT-SPI2, Set-of-Marks, token optimizer
@@ -232,14 +232,14 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 
 ## ADK pipeline (optional)
 
-`pip install -e '.[adk]'`, then `python -m vision_mcp.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/desktop-control/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
+`pip install -e '.[adk]'`, then `python -m vision_mcp.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/dobby/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
 
 ## Agent skills plugin
 
-`plugins/desktop-control/` is a Claude Code plugin of skills that teach an agent
+`plugins/dobby/` is a Claude Code plugin of skills that teach an agent
 to use this server well: a perception ladder that avoids screenshots, verified
 actions, app playbooks (Claude, Chrome, Vivado, Verdi), skill crafting,
 evaluation and troubleshooting. Install it with
 `/plugin marketplace add <path to this repo>` and
-`/plugin install desktop-control@desktop-control`. See
-[plugins/desktop-control/README.md](plugins/desktop-control/README.md).
+`/plugin install dobby@dobby`. See
+[plugins/dobby/README.md](plugins/dobby/README.md).

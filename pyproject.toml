@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "desktop-control"
+name = "dobby"
 version = "0.1.0"
 description = "Model Context Protocol (MCP) server for desktop GUI automation, screen perception, and window management on Linux and Windows"
 readme = "README.md"
@@ -52,7 +52,7 @@ dev = [
 ]
 
 [project.scripts]
-desktop-control = "vision_mcp.server:main"
+dobby = "vision_mcp.server:main"
 vision-mcp = "vision_mcp.server:main"
 
 [tool.setuptools.packages.find]

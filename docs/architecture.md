@@ -1,6 +1,6 @@
 # Architecture Overview
 
-`desktop-control` is designed around a closed-loop **Perception $\rightarrow$ Actuation $\rightarrow$ Verification** cycle.
+`dobby` is designed around a closed-loop **Perception $\rightarrow$ Actuation $\rightarrow$ Verification** cycle.
 
 ```
        +-----------------------------------------------+
@@ -9,7 +9,7 @@
                              |  JSON-RPC (stdio)
                              v
        +-----------------------------------------------+
-       |            desktop-control Server             |
+       |            dobby Server             |
        +-----------------------------------------------+
          /            |             \             \
         v             v              v             v

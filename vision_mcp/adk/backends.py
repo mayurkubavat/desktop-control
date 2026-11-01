@@ -1,4 +1,4 @@
-"""How the runner reaches desktop-control: over MCP (default) or in this process."""
+"""How the runner reaches dobby: over MCP (default) or in this process."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class InProcessBackend:
 
 
 class McpBackend:
-    """Starts desktop-control as an MCP server over stdio and calls its tools."""
+    """Starts dobby as an MCP server over stdio and calls its tools."""
 
     def __init__(self, command: Optional[List[str]] = None, env: Optional[Dict[str, str]] = None) -> None:
         self.command = command or [sys.executable, "-m", "vision_mcp.server"]

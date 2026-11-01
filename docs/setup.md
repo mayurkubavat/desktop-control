@@ -1,6 +1,6 @@
 # Setup and Configuration Guide
 
-This guide covers installing `desktop-control` and configuring it with various Model Context Protocol (MCP) clients.
+This guide covers installing `dobby` and configuring it with various Model Context Protocol (MCP) clients.
 
 ---
 
@@ -13,8 +13,8 @@ This guide covers installing `desktop-control` and configuring it with various M
 
 ### Virtual Environment Setup
 ```bash
-git clone https://github.com/<your-org>/desktop-control.git
-cd desktop-control
+git clone https://github.com/<your-org>/dobby.git
+cd dobby
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -44,15 +44,15 @@ pip install -e ".[dev]"
 ## 3. Client Configuration
 
 ### Claude Desktop
-Add `desktop-control` to your Claude Desktop configuration file:
+Add `dobby` to your Claude Desktop configuration file:
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "desktop-control": {
-      "command": "/absolute/path/to/desktop-control/.venv/bin/desktop-control",
+    "dobby": {
+      "command": "/absolute/path/to/dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":0"
       }
@@ -62,13 +62,13 @@ Add `desktop-control` to your Claude Desktop configuration file:
 ```
 
 ### Antigravity / Gemini CLI
-Add `desktop-control` to your Antigravity configuration file (`~/.gemini/antigravity-cli/mcp_config.json`):
+Add `dobby` to your Antigravity configuration file (`~/.gemini/antigravity-cli/mcp_config.json`):
 
 ```json
 {
   "mcpServers": {
-    "desktop-control": {
-      "command": "/absolute/path/to/desktop-control/.venv/bin/desktop-control",
+    "dobby": {
+      "command": "/absolute/path/to/dobby/.venv/bin/dobby",
       "env": {
         "DISPLAY": ":20"
       }
@@ -83,8 +83,8 @@ In your project or global Cursor settings (`.cursor/mcp.json`):
 ```json
 {
   "mcpServers": {
-    "desktop-control": {
-      "command": "/absolute/path/to/desktop-control/.venv/bin/desktop-control"
+    "dobby": {
+      "command": "/absolute/path/to/dobby/.venv/bin/dobby"
     }
   }
 }
@@ -101,5 +101,5 @@ Verify that the server starts and lists tools correctly:
 .venv/bin/pytest tests/
 
 # Test the CLI command directly
-.venv/bin/desktop-control --help
+.venv/bin/dobby --help
 ```

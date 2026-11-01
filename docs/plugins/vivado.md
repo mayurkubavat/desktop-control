@@ -1,6 +1,6 @@
 # AMD Vivado EDA Plugin
 
-`desktop-control` includes a dedicated application plugin for automating AMD Xilinx Vivado (v2025.1) during FPGA logic design and SystemVerilog verification.
+`dobby` includes a dedicated application plugin for automating AMD Xilinx Vivado (v2025.1) during FPGA logic design and SystemVerilog verification.
 
 ---
 

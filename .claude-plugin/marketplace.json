@@ -1,14 +1,14 @@
 {
-  "name": "desktop-control",
+  "name": "dobby",
   "owner": {
     "name": "Mayur Kubavat"
   },
-  "description": "Local marketplace for the desktop-control skills plugin.",
+  "description": "Local marketplace for the dobby skills plugin.",
   "plugins": [
     {
-      "name": "desktop-control",
-      "source": "./plugins/desktop-control",
-      "description": "Skills for the desktop-control MCP server."
+      "name": "dobby",
+      "source": "./plugins/dobby",
+      "description": "Skills for the dobby MCP server."
     }
   ]
 }

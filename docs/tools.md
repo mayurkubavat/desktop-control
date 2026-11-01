@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-`desktop-control` exposes 37 tools across 6 functional categories.
+`dobby` exposes 37 tools across 6 functional categories.
 
 ---
 

@@ -543,7 +543,8 @@ def get_vision_diagnostics() -> Dict[str, Any]:
 
     diag = DiagnosticsResult(
         platform=sys.platform,
-        display_server="Wayland" if controller.hal._is_wayland else "X11",
+        display_server=getattr(controller.hal, "display_server", None)
+        or ("Wayland" if getattr(controller.hal, "_is_wayland", False) else "X11"),
         primary_screen_size=(screen_w, screen_h),
         active_grounding_strategy=controller.grounding_engine.active_strategy,
         atspi_available=controller.atspi_inspector.is_available,

@@ -5,6 +5,7 @@ from PIL import Image
 
 from vision_mcp.perception.grounding.base import BaseGroundingProvider
 from vision_mcp.perception.atspi import ATSPIInspector
+from vision_mcp.perception.ax import get_accessibility_inspector
 from vision_mcp.types import UIElement
 
 
@@ -12,7 +13,7 @@ class SemanticGroundingProvider(BaseGroundingProvider):
     """Grounding provider leveraging OS accessibility trees (AT-SPI2 on Linux)."""
 
     def __init__(self, inspector: Optional[ATSPIInspector] = None) -> None:
-        self.inspector = inspector or ATSPIInspector()
+        self.inspector = inspector or get_accessibility_inspector()
 
     @property
     def name(self) -> str:

@@ -3,6 +3,7 @@
 import re
 import time
 import logging
+import sys
 from typing import Any, Optional, Dict, Tuple, List, Callable
 from PIL import Image
 
@@ -86,7 +87,7 @@ class FeedbackLoopController:
         )
         self.quiescence_monitor = (
             X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
-            if CONFIG.enable_quiescence_monitor
+            if CONFIG.enable_quiescence_monitor and sys.platform != "darwin"
             else None
         )
         self.journal_correlator = JournalCorrelator()

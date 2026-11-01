@@ -145,6 +145,10 @@ class ATSPIInspector:
 
         return elements[:CONFIG.som_max_elements]
 
+    def inspect(self) -> List[UIElement]:
+        """All elements, interactable or not (used by post-condition checks)."""
+        return self.inspect_desktop(filter_interactable=False)
+
     def _traverse_node(
         self,
         node,

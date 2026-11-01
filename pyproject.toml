@@ -25,6 +25,12 @@ ocr = [
     "rapidocr_onnxruntime>=1.3; sys_platform != 'darwin'",
     "pyobjc-framework-Vision>=10.0; sys_platform == 'darwin'",
 ]
+# macOS backend: Quartz capture/input, Accessibility tree, AppKit window activation
+macos = [
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

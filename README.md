@@ -1,6 +1,6 @@
 # Desktop Control
 
-A Model Context Protocol (MCP) server for desktop automation, screen perception, and window management on Linux and Windows.
+A Model Context Protocol (MCP) server for desktop automation, screen perception, and window management on Linux, Windows and macOS.
 
 `desktop-control` lets AI coding assistants and autonomous agents (such as Antigravity, Claude, and Gemini) interact with graphical desktop applications. It provides tools for screen capture, mouse and keyboard control, UI element detection, window management, and executing multi-step action scripts.
 
@@ -43,6 +43,20 @@ pip install -e .
 
 # Optional local OCR lane (RapidOCR on Linux/Windows, Apple Vision on macOS)
 pip install -e ".[ocr]"
+
+# macOS backend (Quartz capture/input, Accessibility tree)
+pip install -e ".[macos,ocr]"
+```
+
+On macOS, grant the app that launches the server (Terminal, Claude, Antigravity)
+**Accessibility** and **Screen Recording** in System Settings > Privacy & Security.
+Coordinates are logical points; Retina captures are resized to points. Shortcuts use
+`cmd` for Command (`hotkey("cmd+s")`); `ctrl` is the Control key.
+
+Read-only smoke test of the local stack (HAL, accessibility, OCR, Gemma):
+
+```bash
+python scripts/smoke_local.py
 ```
 
 To run the test suite:

@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List, Tuple, Callable
 
 from vision_mcp.hal.base import IDesktopHAL
 from vision_mcp.perception.atspi import ATSPIInspector
+from vision_mcp.perception.ax import get_accessibility_inspector
 from vision_mcp.types import (
     UIElement,
     BoundingBox,
@@ -193,7 +194,7 @@ class ObstructionInterceptor:
         min_confidence: float = 0.8,
     ) -> None:
         self.hal = hal
-        self.atspi = atspi_inspector or ATSPIInspector()
+        self.atspi = atspi_inspector or get_accessibility_inspector()
         self.router = SemanticModalRouter(classifier=modal_classifier, min_confidence=min_confidence)
         self.pending_escalation: Optional[ModalEscalationPayload] = None
         self.pending_buttons: Dict[str, ModalButtonOption] = {}

@@ -138,7 +138,6 @@ class _Panel:
         win.setBackgroundColor_(NSColor.clearColor())
         win.setHasShadow_(False)
         win.setIgnoresMouseEvents_(True)
-        win.setLevel_(NSScreenSaverWindowLevel)
         win.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
@@ -150,6 +149,9 @@ class _Panel:
         win.setHidesOnDeactivate_(False)
         win.setFloatingPanel_(True)
         win.setBecomesKeyOnlyIfNeeded_(True)
+        # After setFloatingPanel_, which resets the level to floating (3) and
+        # would put the overlay under the menu bar and open menus.
+        win.setLevel_(NSScreenSaverWindowLevel)
 
         view = NSView.alloc().initWithFrame_(((0, 0), (fr.size.width, fr.size.height)))
         view.setWantsLayer_(True)

@@ -130,20 +130,26 @@ class LocalNeuralGrounder:
         task_intent: str = "ground_ui",
     ) -> List[Dict[str, Any]]:
         """
-        Runs high-precision cognitive grounding on a sub-pane ROI using local Gemma 3.
-        Falls back to CV proposals if Gemma 3 is disabled, unavailable, or yields no detections.
-        """
-        if self.enable_gemma3 and self.gemma3_grounder:
-            proposals = self.gemma3_grounder.ground_roi(
-                image=image,
-                offset=offset,
-                anchor_id=anchor_id,
-                task_intent=task_intent,
-            )
-            if proposals:
-                return proposals
+        Detector boxes for a sub-pane ROI, named by local Gemma where possible.
 
-        return self.generate_proposals(image, offset)
+        Geometry always comes from the ONNX/CV detector. Gemma only labels the
+        numbered boxes (Set-of-Marks), so a Gemma failure just leaves names empty.
+        ``anchor_id`` scopes the label cache (use the app or pane name).
+        """
+        proposals = self.generate_proposals(image, offset=(0, 0))
+        if self.enable_gemma3 and self.gemma3_grounder and proposals:
+            boxes = [
+                (p["bbox"]["x"], p["bbox"]["y"], p["bbox"]["width"], p["bbox"]["height"]) for p in proposals
+            ]
+            labels = self.gemma3_grounder.marks.label_marks(image, boxes, app_key=anchor_id)
+            for i, info in labels.items():
+                proposals[i]["text"] = info["label"]
+                proposals[i]["class_name"] = info["role"]
+                proposals[i]["named_by"] = "gemma"
+        ox, oy = offset
+        for p in proposals:
+            p["bbox"] = {**p["bbox"], "x": p["bbox"]["x"] + ox, "y": p["bbox"]["y"] + oy}
+        return proposals
 
     def _run_onnx_inference(self, image: Image.Image, offset: Tuple[int, int]) -> List[Dict[str, Any]]:
         """Runs batched ONNX tensor inference on the frame."""

@@ -878,6 +878,7 @@ class FeedbackLoopController:
         self,
         window_id: Optional[str] = None,
         title_filter: Optional[str] = None,
+        label_with_gemma: Optional[bool] = None,
     ) -> VirtualDOMSnapshot:
         """
         Captures desktop and accessibility state, fuses AT-SPI2 nodes with local neural/CV
@@ -891,7 +892,10 @@ class FeedbackLoopController:
         win_title = target_win.title if target_win else "Desktop"
         win_id_str = target_win.window_id if target_win else ""
 
-        img, _, _, _ = self.pipeline.capture(draw_cursor=False, scale_down=False)
+        # Capture only the target window so proposal offsets match the pixels
+        # (a full-screen capture offset by the window origin misplaced every box).
+        region = (win_bbox.x, win_bbox.y, win_bbox.width, win_bbox.height) if target_win else None
+        img, _, _, _ = self.pipeline.capture(region=region, draw_cursor=False, scale_down=False)
 
         # Write frame to shared memory (/dev/shm) for sidecar daemons
         self.neural_grounder.write_frame_to_shm(img)
@@ -917,8 +921,77 @@ class FeedbackLoopController:
             window_title=win_title,
             window_bbox=win_bbox,
         )
+        use_gemma = CONFIG.gemma3_label_vdom if label_with_gemma is None else label_with_gemma
+        if use_gemma:
+            self._label_vdom_with_gemma(snapshot, img, win_bbox, app_key=self._get_active_app_key())
         self.last_vdom_snapshot = snapshot
         return snapshot
+
+    def _label_vdom_with_gemma(
+        self,
+        snapshot: VirtualDOMSnapshot,
+        img: Image.Image,
+        win_bbox: BoundingBox,
+        app_key: str,
+    ) -> int:
+        """Names VISION_ONLY nodes with empty names via Gemma Set-of-Marks. Returns how many were named."""
+        gemma = self.neural_grounder.gemma3_grounder
+        if gemma is None:
+            return 0
+        targets = [
+            n for n in snapshot.nodes.values()
+            if n.source == GroundingSource.VISION_ONLY and not n.name.strip()
+        ]
+        if not targets:
+            return 0
+        boxes = [(n.bbox.x - win_bbox.x, n.bbox.y - win_bbox.y, n.bbox.width, n.bbox.height) for n in targets]
+        labels = gemma.marks.label_marks(img, boxes, app_key=app_key)
+        for i, info in labels.items():
+            node = targets[i]
+            node.name = info["label"]
+            try:
+                node.role = UIRole(info["role"])
+            except ValueError:
+                pass
+            node.attributes["named_by"] = "gemma"
+        return len(labels)
+
+    def find_with_gemma(
+        self,
+        description: str,
+        region: Optional[Tuple[int, int, int, int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Finds an element by description on canvases and custom widgets that have
+        no accessibility names: the detector proposes boxes, Gemma picks one by
+        number, and the click point comes from the detector box.
+        """
+        gemma = self.neural_grounder.gemma3_grounder
+        if gemma is None:
+            return {"found": False, "reason": "Gemma sidecar disabled"}
+        if region is None:
+            win = self.hal.get_active_window()
+            if win and win.bbox.width > 0 and win.bbox.height > 0:
+                region = (win.bbox.x, win.bbox.y, win.bbox.width, win.bbox.height)
+        ox, oy = (region[0], region[1]) if region else (0, 0)
+        img = self.hal.capture_screen(region=region)
+        proposals = self.neural_grounder.generate_proposals(img, offset=(0, 0))
+        # Largest-first keeps real controls ahead of glyph fragments when capped
+        proposals.sort(key=lambda p: p["bbox"]["width"] * p["bbox"]["height"], reverse=True)
+        boxes = [(p["bbox"]["x"], p["bbox"]["y"], p["bbox"]["width"], p["bbox"]["height"]) for p in proposals]
+        res = gemma.marks.find_mark(img, boxes, description)
+        if res["index"] is None:
+            return {"found": False, "candidates": len(boxes), **{k: res[k] for k in ("confidence", "reason", "source")}}
+        x, y, w, h = boxes[res["index"]]
+        return {
+            "found": True,
+            "bbox": {"x": ox + x, "y": oy + y, "width": w, "height": h},
+            "click_point": [ox + x + w // 2, oy + y + h // 2],
+            "candidates": len(boxes),
+            "confidence": res["confidence"],
+            "reason": res["reason"],
+            "source": res["source"],
+        }
 
     def query_vdom(
         self,

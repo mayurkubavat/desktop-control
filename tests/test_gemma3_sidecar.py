@@ -254,21 +254,19 @@ def test_gemma3_vdom_fusion():
 
 
 def test_local_neural_grounder_delegation():
+    """ground_subpane keeps detector geometry and only takes names from Gemma."""
     grounder = LocalNeuralGrounder(enable_gemma3=True)
     img = _create_sample_image()
+    detector_box = {"bbox": {"x": 30, "y": 40, "width": 50, "height": 20}, "confidence": 0.82, "class_name": "push_button", "text": ""}
 
-    with patch.object(grounder.gemma3_grounder, "ground_roi") as mock_ground_roi:
-        mock_ground_roi.return_value = [
-            {
-                "bbox": {"x": 30, "y": 40, "width": 50, "height": 20},
-                "confidence": 0.92,
-                "class_name": "icon_button",
-                "text": "Step",
-                "source": "VISION_ONLY",
-            }
-        ]
-
+    with patch.object(grounder, "generate_proposals", return_value=[dict(detector_box)]), \
+         patch.object(grounder.gemma3_grounder.marks, "label_marks", return_value={0: {"label": "Step", "role": "icon_button"}}) as mock_label:
         proposals = grounder.ground_subpane(img, offset=(10, 20), anchor_id="sim_toolbar")
-        assert len(proposals) == 1
-        assert proposals[0]["class_name"] == "icon_button"
-        mock_ground_roi.assert_called_once()
+
+    assert len(proposals) == 1
+    assert proposals[0]["bbox"] == {"x": 40, "y": 60, "width": 50, "height": 20}
+    assert proposals[0]["class_name"] == "icon_button"
+    assert proposals[0]["text"] == "Step"
+    assert proposals[0]["named_by"] == "gemma"
+    mock_label.assert_called_once()
+    assert mock_label.call_args.kwargs["app_key"] == "sim_toolbar"

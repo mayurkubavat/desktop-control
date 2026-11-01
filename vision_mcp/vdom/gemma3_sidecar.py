@@ -205,6 +205,9 @@ class Gemma3Grounder:
         self.timeout = timeout
         self.cache = SemanticROICache(capacity=cache_capacity, threshold=dhash_threshold)
         self.cache_hits = 0
+        from vision_mcp.vdom.gemma_marks import GemmaMarkLabeler
+
+        self.marks = GemmaMarkLabeler(self.client, vision_model=vision_model, timeout=timeout)
 
     def is_available(self) -> bool:
         """True when Ollama is reachable and both configured models are installed (exact names)."""
@@ -219,6 +222,8 @@ class Gemma3Grounder:
             "installed_models": sorted(installed),
             "roi_cache_entries": len(self.cache),
             "roi_cache_hits": self.cache_hits,
+            "mark_label_cache_entries": len(self.marks.cache),
+            "mark_label_cache_hits": self.marks.cache_hits,
             **self.client.stats(),
         }
 
@@ -230,6 +235,10 @@ class Gemma3Grounder:
         task_intent: str = "ground_ui",
     ) -> List[Dict[str, Any]]:
         """
+        Deprecated: asks Gemma to regress box coordinates, which Gemma 3 does
+        poorly. Prefer ``self.marks.label_marks`` / ``find_mark`` on detector
+        boxes (see LocalNeuralGrounder.ground_subpane). Kept for compatibility.
+
         Grounds UI elements inside an ROI crop and returns proposals in absolute
         screen coordinates. Returns [] on any Gemma failure so callers fall back
         to the CV/ONNX proposals.

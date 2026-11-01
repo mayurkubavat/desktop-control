@@ -151,6 +151,14 @@ class VisionConfig(BaseModel):
         default=896,
         description="Long-side pixel cap for crops sent to Gemma (896 is Gemma 3's native image size).",
     )
+    gemma3_max_marks: int = Field(
+        default=30,
+        description="Most numbered boxes drawn on one crop for Gemma Set-of-Marks labeling or selection.",
+    )
+    gemma3_label_vdom: bool = Field(
+        default=False,
+        description="Name unlabeled VISION_ONLY vDOM nodes with Gemma during capture_vdom (adds seconds per uncached batch).",
+    )
     gemma3_timeout_seconds: float = Field(
         default=25.0,
         description="Maximum timeout in seconds for local Gemma 3 inference requests.",

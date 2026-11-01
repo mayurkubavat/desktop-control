@@ -588,6 +588,25 @@ def ask_screen(question: str, region: Optional[List[int]] = None) -> Dict[str, A
 
 
 @mcp_server.tool()
+def find_visual_element(description: str, region: Optional[List[int]] = None) -> Dict[str, Any]:
+    """
+    Finds an element by description where accessibility gives no names (canvases,
+    custom Qt/Tk widgets, EDA toolbars). The local detector proposes boxes, local
+    Gemma picks one by number, and the click point comes from the detector box,
+    never from the model. No image is returned.
+
+    Args:
+        description: What to find, e.g. "Run Simulation button" or "zoom fit icon".
+        region: Optional [x, y, width, height]; defaults to the active window.
+
+    Returns:
+        {found, bbox, click_point, candidates, confidence, reason, source}
+    """
+    reg_tuple = tuple(region) if region and len(region) == 4 else None
+    return controller.find_with_gemma(description, region=reg_tuple)
+
+
+@mcp_server.tool()
 def run_terminal_command(
     command: str,
     timeout_seconds: int = CONFIG.command_timeout_seconds,
@@ -958,6 +977,7 @@ def delete_crystallized_skill(
 def capture_vdom(
     window_id: Optional[str] = None,
     title_filter: Optional[str] = None,
+    label_with_gemma: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Unified Virtual DOM (vDOM): Captures and indexes UI state by fusing AT-SPI2
@@ -966,11 +986,15 @@ def capture_vdom(
     Args:
         window_id: Optional target window ID to localize capture.
         title_filter: Optional window title substring filter.
-        
+        label_with_gemma: Name unlabeled visual-only nodes with local Gemma (Set-of-Marks;
+            cached per app). Defaults to the gemma3_label_vdom setting.
+
     Returns:
         VirtualDOMSnapshot dictionary containing node hierarchy, bounds, and roles.
     """
-    snapshot = controller.capture_vdom(window_id=window_id, title_filter=title_filter)
+    snapshot = controller.capture_vdom(
+        window_id=window_id, title_filter=title_filter, label_with_gemma=label_with_gemma
+    )
     return snapshot.model_dump()
 
 

@@ -87,7 +87,7 @@ Add `desktop-control` to your MCP client configuration file:
 
 ---
 
-## Available Tools (38 Tools)
+## Available Tools (39 Tools)
 
 ### Screen Perception & Window Management
 | Tool | Description |
@@ -120,7 +120,8 @@ Add `desktop-control` to your MCP client configuration file:
 | `find_element` | Finds an element's screen coordinates by text label or accessible role. |
 | `find_and_click` | Finds an element by label and clicks it in a single step. |
 | `get_accessibility_tree` | Retrieves the accessibility tree (AT-SPI2) for open applications. |
-| `capture_vdom` | Fuses accessibility and visual elements into an indexed virtual DOM. |
+| `capture_vdom` | Fuses accessibility and visual elements into an indexed virtual DOM; `label_with_gemma` names unlabeled visual nodes with local Gemma. |
+| `find_visual_element` | Finds an unlabeled element by description: detector boxes, local Gemma picks one by number, click point from the detector. |
 | `query_vdom` | Queries the virtual DOM using CSS-style selectors (e.g., `push_button`, `tab_item`). |
 
 ### Trajectories, Macros & Script Crystallization

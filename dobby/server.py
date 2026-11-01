@@ -914,15 +914,15 @@ def get_screen_state(
         use_ocr: Also read text with local OCR (names unlabeled controls, adds text-only targets).
         max_elements: Cap on elements returned.
         as_text: Return the compact text view (default) instead of full element dicts.
-        settle: First wait (up to ~2.5 s) until the window stops changing, so a half-loaded
-            page is not read as the result.
+        settle: Right after an action (last 3 s), first wait (up to ~2.5 s) until the window
+            stops changing, so a half-loaded page is not read as the result.
         include_icons: Add unnamed icon-detector boxes the accessibility tree missed
             ("seen, not named"); pick among them with decide_visual_element.
     """
     from dobby.screen_state.observe import observe
 
     state = observe(controller, _tracker(), app_name_filter=app_name_filter, use_ocr=use_ocr,
-                    settle=settle, use_detector=include_icons)
+                    settle="auto" if settle else False, use_detector=include_icons)
     out = {"generation": state.generation, "element_count": len(state.elements), "operations": state.operations,
            "settle": state.settle}
     if as_text:

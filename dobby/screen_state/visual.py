@@ -14,7 +14,7 @@ chosen box, because a choice is only relative to the boxes it was shown.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dobby.screen_state.observe import observe
 from dobby.screen_state.state import ScreenElement, StateTracker
@@ -24,11 +24,29 @@ logger = logging.getLogger(__name__)
 MAX_MARKS = 20  # letters A..T, plus "None of these"
 
 
-def _candidates(elements: List[ScreenElement], limit: int) -> List[ScreenElement]:
-    """Unnamed and icon elements first (that is why we look), then the rest, in reading order."""
-    unnamed = [e for e in elements if e.source == "detector" or not e.label]
-    named = [e for e in elements if e not in unnamed and e.role != "text"]
+def _candidates(elements: List[ScreenElement], window: Tuple[int, int, int, int], limit: int) -> List[ScreenElement]:
+    """
+    Elements drawn inside the screenshot: unnamed and icon elements first (that
+    is why we look), then named controls, in reading order. Menu bar items and
+    anything else outside the window are left out: Gemma could only pick them
+    from their text, and the text lane already covers them.
+    """
+    wx, wy, ww, wh = window
+
+    def inside(e: ScreenElement) -> bool:
+        cx, cy = e.center
+        return e.position != "menu bar" and wx <= cx < wx + ww and wy <= cy < wy + wh
+
+    shown = [e for e in elements if inside(e)]
+    unnamed = [e for e in shown if e.source == "detector" or not e.label]
+    named = [e for e in shown if e not in unnamed and e.role != "text"]
     return (unnamed + named)[: max(1, limit)]
+
+
+def _clip(box: Tuple[int, int, int, int], w: int, h: int) -> Tuple[int, int, int, int]:
+    x0, y0 = max(0, min(w - 1, box[0])), max(0, min(h - 1, box[1]))
+    x1, y1 = max(x0 + 1, min(w, box[0] + box[2])), max(y0 + 1, min(h, box[1] + box[3]))
+    return (x0, y0, x1 - x0, y1 - y0)
 
 
 def decide_visual_element(
@@ -54,11 +72,11 @@ def decide_visual_element(
     from dobby.gemma.gate import GateResult, Verdict, gate
     from dobby.vdom.gemma_marks import draw_marks
 
-    state = observe(controller, tracker, app_name_filter=app_name_filter, settle=True, use_detector=True)
+    state = observe(controller, tracker, app_name_filter=app_name_filter, settle="auto", use_detector=True)
     if state.window is None:
         return {"generation": state.generation, "eid": None,
                 "gate": {"verdict": "escalate", "reason": "no active window to look at"}}
-    cands = _candidates(state.elements, min(int(max_marks), MAX_MARKS))
+    cands = _candidates(state.elements, state.window, min(int(max_marks), MAX_MARKS))
     if not cands:
         return {"generation": state.generation, "eid": None,
                 "gate": {"verdict": "escalate", "reason": "nothing on screen to mark"}}
@@ -72,7 +90,8 @@ def decide_visual_element(
     # Screen points -> screenshot pixels (Retina captures are 2x the window size).
     sx = shot.width / float(ww) if ww else 1.0
     sy = shot.height / float(wh) if wh else 1.0
-    boxes = [(int((e.x - wx) * sx), int((e.y - wy) * sy), max(1, int(e.width * sx)), max(1, int(e.height * sy)))
+    boxes = [_clip((int((e.x - wx) * sx), int((e.y - wy) * sy), max(1, int(e.width * sx)), max(1, int(e.height * sy))),
+                   shot.width, shot.height)
              for e in cands]
     letters = option_labels(len(cands))
     max_side = int(getattr(getattr(decider, "client", None), "max_side", 0) or 1280)

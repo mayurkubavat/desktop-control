@@ -247,3 +247,42 @@ def test_text_lane_escalation_falls_back_to_visual():
     out = decide_next_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "zoom to fit",
                               visual_fallback=True)
     assert out["source"] == "visual" and out["text_lane"]["gate"]["verdict"] == "escalate"
+
+
+# ------------------------------------------------- fixes from the Mac smoke test
+
+
+def test_visual_choice_skips_menu_bar_and_off_window_elements():
+    win = WindowInfo(window_id="7", title="Doc", bbox=BoundingBox(x=100, y=100, width=400, height=300),
+                     is_active=True, app_name="Editor")
+    hal = FakeHAL()
+    hal.get_active_window = lambda: win
+    ctl = FakeController([node("menu item", "View", 60, 0, 40, 22), node("push button", "", 120, 120, 30, 30)], hal=hal)
+    fake = FakeOllama(letter="A")
+    out = decide_visual_element(ctl, StateTracker(), GemmaDecider(GemmaClient(transport=fake)), "open search")
+    assert out["marks"] == 1 and out["element"]["bbox"]["x"] == 120 and out["gate"]["verdict"] == "act"
+
+
+def test_degenerate_detector_falls_back_to_contours_and_scales_retina():
+    from dobby.screen_state.observe import detect_icon_boxes, looks_degenerate
+
+    class Grounder:
+        def generate_proposals(self, image, offset=(0, 0)):
+            return [{"bbox": {"x": 10 * i, "y": 0, "width": 257, "height": 113}} for i in range(8)]
+
+        def _generate_cv_proposals(self, image, offset=(0, 0)):
+            return [{"bbox": {"x": 40, "y": 20, "width": 48, "height": 48}},      # 24x24 pt icon
+                    {"bbox": {"x": 0, "y": 0, "width": 700, "height": 40}}]       # toolbar strip, too big
+
+    hal = FakeHAL(shots=[Image.new("RGB", (800, 600))])                          # 2x capture of a 400x300 window
+    ctl = SimpleNamespace(hal=hal, neural_grounder=Grounder())
+    assert looks_degenerate([(0, 0, 257, 113)] * 8)
+    assert detect_icon_boxes(ctl, (100, 50, 400, 300)) == [(120, 60, 24, 24)]
+
+
+def test_settle_auto_only_right_after_an_action():
+    ctl = FakeController([node("push button", "OK", 10, 10)])
+    t = StateTracker()
+    assert observe(ctl, t, settle="auto").settle is None
+    t.mark_action()
+    assert observe(ctl, t, settle="auto").settle["settled"]

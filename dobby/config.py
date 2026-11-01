@@ -125,6 +125,10 @@ class VisionConfig(BaseModel):
         default=2.5,
         description="Screen state: longest wait for the window to stop changing before reading it.",
     )
+    settle_after_action_s: float = Field(
+        default=3.0,
+        description='Screen state: settle="auto" waits only if the last action was this recent.',
+    )
     settle_interval_s: float = Field(default=0.12, description="Screen state: time between settle samples.")
     settle_max_delta: float = Field(
         default=1.5,

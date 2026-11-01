@@ -9,6 +9,7 @@ so cassette replay works unchanged.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from dobby.config import CONFIG
@@ -53,7 +54,7 @@ def observe(
     app_name_filter: Optional[str] = None,
     use_ocr: bool = True,
     clip_to_window: bool = True,
-    settle: bool = False,
+    settle: Any = False,
     use_detector: bool = False,
 ) -> ScreenState:
     """
@@ -61,6 +62,8 @@ def observe(
 
     ``settle`` first waits until the window stops changing (loading pages,
     sliding sheets), so a half-drawn screen is not read as the result.
+    ``settle="auto"`` waits only within ``settle_after_action_s`` of the last
+    action, since each settle costs two captures (~0.5 s on a Mac).
     ``use_detector`` adds unnamed icon boxes the accessibility tree and OCR
     missed (for :func:`decide_visual_element`).
     """
@@ -73,6 +76,8 @@ def observe(
     region = _window_region(win) if win is not None else None
 
     settled = None
+    if settle == "auto":
+        settle = (time.time() - tracker.last_action_at) < CONFIG.settle_after_action_s
     if settle:
         settled = settle_window(
             controller, region,
@@ -109,24 +114,9 @@ def observe(
     return tracker.remember(state)
 
 
-def detect_icon_boxes(controller: Any, region: Optional[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
-    """Icon-detector boxes (screen coordinates) inside ``region``, largest first; [] when unavailable.
-
-    Largest first keeps real controls ahead of glyph fragments; boxes that
-    contain named elements (panels) are dropped later by ``build_state``.
-    """
-    grounder = getattr(controller, "neural_grounder", None)
-    if grounder is None or not hasattr(grounder, "generate_proposals"):
-        return []
-    try:
-        img = controller.hal.capture_screen(region=region)
-        ox, oy = (region[0], region[1]) if region else (0, 0)
-        proposals = grounder.generate_proposals(img, offset=(ox, oy)) or []
-    except Exception as e:
-        logger.debug("icon detector unavailable: %s", e)
-        return []
+def _px_boxes(proposals: Any) -> List[Tuple[int, int, int, int]]:
     out = []
-    for p in proposals:
+    for p in proposals or []:
         b = p.get("bbox") if isinstance(p, dict) else None
         if not b:
             continue
@@ -134,6 +124,58 @@ def detect_icon_boxes(controller: Any, region: Optional[Tuple[int, int, int, int
             out.append((int(b["x"]), int(b["y"]), int(b["width"]), int(b["height"])))
         except (KeyError, TypeError, ValueError):
             continue
+    return out
+
+
+def looks_degenerate(boxes: List[Tuple[int, int, int, int]], min_boxes: int = 6, share: float = 0.4) -> bool:
+    """True when most boxes have the exact same size: a detector decoding anchors, not seeing icons."""
+    if len(boxes) < min_boxes:
+        return False
+    sizes: Dict[Tuple[int, int], int] = {}
+    for _, _, w, h in boxes:
+        sizes[(w, h)] = sizes.get((w, h), 0) + 1
+    return max(sizes.values()) >= share * len(boxes)
+
+
+def detect_icon_boxes(
+    controller: Any,
+    region: Optional[Tuple[int, int, int, int]],
+    min_side: int = 10,
+    max_side: int = 96,
+    max_aspect: float = 4.0,
+) -> List[Tuple[int, int, int, int]]:
+    """
+    Icon-sized detector boxes in screen points inside ``region``, largest first; [] when unavailable.
+
+    The capture is in pixels (2x on Retina), so boxes are scaled back to points.
+    When the neural detector returns fixed-size anchor boxes (a decode fault seen
+    on the Mac), its output is discarded and the OpenCV contour detector is used.
+    Only icon-sized boxes are kept; boxes that contain named elements are dropped
+    later by ``build_state``.
+    """
+    grounder = getattr(controller, "neural_grounder", None)
+    if grounder is None or not hasattr(grounder, "generate_proposals") or region is None:
+        return []
+    try:
+        img = controller.hal.capture_screen(region=region)
+        boxes = _px_boxes(grounder.generate_proposals(img, offset=(0, 0)))
+        if looks_degenerate(boxes) and hasattr(grounder, "_generate_cv_proposals"):
+            logger.debug("icon detector output looks degenerate (%d boxes); using contours", len(boxes))
+            boxes = _px_boxes(grounder._generate_cv_proposals(img, (0, 0)))
+    except Exception as e:
+        logger.debug("icon detector unavailable: %s", e)
+        return []
+    rx, ry, rw, rh = region
+    sx = img.width / float(rw) if rw else 1.0
+    sy = img.height / float(rh) if rh else 1.0
+    out = []
+    for x, y, w, h in boxes:
+        pw, ph = w / sx, h / sy
+        if not (min_side <= pw <= max_side and min_side <= ph <= max_side):
+            continue
+        if max(pw, ph) / max(1.0, min(pw, ph)) > max_aspect:
+            continue
+        out.append((int(rx + x / sx), int(ry + y / sy), int(round(pw)), int(round(ph))))
     out.sort(key=lambda bx: bx[2] * bx[3], reverse=True)
     return out
 
@@ -272,7 +314,7 @@ def decide_next_element(
     from dobby.gemma.decide import shortlist
     from dobby.gemma.gate import GateResult, Verdict, gate
 
-    state = observe(controller, tracker, app_name_filter=app_name_filter, settle=True)
+    state = observe(controller, tracker, app_name_filter=app_name_filter, settle="auto")
     candidates = shortlist(goal, state.elements, k=max(1, min(25, k)), text=lambda e: f"{e.role} {e.label}")
     if not candidates:
         out = {"generation": state.generation, "eid": None, "gate": {"verdict": "escalate", "reason": "no elements on screen"}}

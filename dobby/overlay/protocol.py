@@ -23,7 +23,7 @@ CURSOR_STATES = ("idle", "thinking", "typing", "waiting_user")
 RISK_LEVELS = ("ok", "caution", "danger")
 
 #: Events the helper sends unprompted: ``{"event": <name>, ...}``.
-EVENTS = ("stop", "pause", "resume", "user_input", "user_idle")
+EVENTS = ("stop", "pause", "resume", "user_input", "user_idle", "wake", "sleep")
 
 # op -> (required fields, optional fields)
 OPS: Dict[str, tuple] = {

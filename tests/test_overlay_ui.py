@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from dobby.overlay import geometry
-from dobby.overlay.menu import bar_click, bar_view, menu_entries, status_of
+from dobby.overlay.menu import bar_click, bar_view, label_click, menu_entries, status_of
 
 ARROW_W, ARROW_H, CHIP_H = 13 * 1.25, 21.5 * 1.25, 20.0
 
@@ -63,10 +63,39 @@ class TestBarStates:
         assert view(turbo=True, working=working)[1].startswith(text)
 
 
+class TestBarAwake:
+    def test_awake_bar_is_ready_for_a_task(self):
+        assert view(awake=True) == ("awake", "Dobby is awake · ready for a task", "Pause", "Stop", "ok", 1.0)
+
+    def test_sleeping_dot_stays_dimmed(self):
+        v = view(awake=False)
+        assert v[0] == "ready" and v[5] == 0.45
+
+    def test_any_helper_shows_awake(self):
+        assert view(owner=False, awake=True)[0] == "awake"
+        assert view(bar_mode="auto", awake=True)[0] == "awake"
+
+    @pytest.mark.parametrize("kw,mode", [
+        (dict(working=True), "working"), (dict(paused=True), "paused"),
+        (dict(takeover=True), "takeover"), (dict(current_mode="stopped"), "stopped"),
+    ])
+    def test_awake_loses_to_other_states(self, kw, mode):
+        assert view(awake=True, **kw)[0] == mode
+
+
+@pytest.mark.parametrize("mode,action", [
+    ("ready", "wake"), ("awake", "sleep"), ("working", "none"), ("paused", "none"),
+    ("takeover", "none"), ("stopped", "none"), ("confirm", "none"), ("hidden", "none"),
+])
+def test_bar_label_click(mode, action):
+    assert label_click(mode) == action
+
+
 @pytest.mark.parametrize("mode,which,action", [
     ("confirm", "primary", "allow"), ("confirm", "secondary", "deny"),
     ("working", "primary", "pause"), ("ready", "primary", "pause"),
     ("working", "secondary", "stop"), ("ready", "secondary", "stop"),
+    ("awake", "primary", "pause"), ("awake", "secondary", "stop"),
     ("paused", "primary", "resume"), ("takeover", "primary", "resume"),
     ("paused", "secondary", "stop"), ("takeover", "secondary", "stop"),
     ("stopped", "primary", "dismiss"), ("stopped", "secondary", "hide"),
@@ -134,6 +163,19 @@ def test_menu_recent_steps_newest_first_and_short():
     assert len(titles[i + 1].strip()) <= 60
     assert titles[i + 2].strip() == "second" and titles[i + 3].strip() == "first"
     assert titles[0] == "Dobby: Idle"
+
+
+@pytest.mark.parametrize("awake,title,action", [
+    (False, "Wake Dobby", "menuWake:"), (True, "Put Dobby to sleep", "menuSleep:"),
+])
+def test_menu_wake_and_sleep_entry(awake, title, action):
+    entries = _entries(awake=awake)
+    assert entries[1] == ("-", None, None) and entries[2] == (title, action, None)
+
+
+def test_menu_has_no_wake_entry_while_working():
+    titles = [t for t, _, _ in _entries(awake=None)]
+    assert "Wake Dobby" not in titles and "Put Dobby to sleep" not in titles
 
 
 def test_menu_with_no_steps_says_so():

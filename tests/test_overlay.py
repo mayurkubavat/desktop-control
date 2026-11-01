@@ -456,6 +456,27 @@ def test_client_pause_then_resume(fake_client):
     assert 0.2 < time.monotonic() - t0 < 3
 
 
+def test_client_wake_and_sleep_events(fake_client):
+    client, _ = fake_client
+    woke = []
+    client.on_wake(lambda: woke.append(client.awake))
+    client.on_wake(lambda: 1 / 0)  # a failing callback is logged, not fatal
+    assert client.awake is False
+    client.intent("EMIT:wake")
+    client.move(1, 1, ms=0)  # round trip so the event has been read
+    assert woke == [True] and client.awake is True
+    client.intent("EMIT:sleep")
+    client.move(1, 1, ms=0)
+    assert client.awake is False and woke == [True]
+    client.checkpoint()  # waking does not stop or pause
+
+
+def test_null_overlay_is_never_awake():
+    n = NullOverlay()
+    assert n.awake is False
+    n.on_wake(lambda: None)
+
+
 def test_client_pause_timeout(fake_client):
     client, _ = fake_client
     client.intent("EMIT:pause")
@@ -701,3 +722,12 @@ def test_bar_owner_lock_is_exclusive_and_handed_over(tmp_path):
     a.release()
     assert b.try_acquire()
     b.release()
+
+
+def test_overlay_config_awake_secs():
+    from dobby.overlay import overlay_config
+
+    assert "awake_secs" not in overlay_config({})
+    assert overlay_config({"DOBBY_OVERLAY_AWAKE_SECS": "30"})["awake_secs"] == 30.0
+    assert overlay_config({"DOBBY_OVERLAY_AWAKE_SECS": "1"})["awake_secs"] == 5.0
+    assert "awake_secs" not in overlay_config({"DOBBY_OVERLAY_AWAKE_SECS": "soon"})

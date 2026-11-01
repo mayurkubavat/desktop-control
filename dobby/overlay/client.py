@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import protocol
 
@@ -47,6 +47,10 @@ class NullOverlay:
 
     active = False
     pid: Optional[int] = None
+    awake = False  # the user woke Dobby from the control bar
+
+    def on_wake(self, cb: Callable[[], None]) -> None:
+        """Call ``cb`` (on the reader thread) when the user wakes Dobby."""
 
     def move(self, x: float, y: float, ms: Optional[int] = None, wait: bool = True,
              verb: Optional[str] = None, probe: bool = False) -> bool:
@@ -133,6 +137,8 @@ class OverlayClient(NullOverlay):
         self._paused = False
         self._user_active = False
         self._user_input_seen = False
+        self.awake = False
+        self._wake_callbacks: List[Callable[[], None]] = []
         atexit.register(self.close)
 
     # ----------------------------------------------------------------- state
@@ -269,7 +275,21 @@ class OverlayClient(NullOverlay):
                 self._user_input_seen = True
             elif name == "user_idle":
                 self._user_active = False
+            elif name == "wake":
+                self.awake = True
+            elif name == "sleep":
+                self.awake = False
             self._cond.notify_all()
+        if name == "wake":
+            for cb in list(self._wake_callbacks):
+                try:
+                    cb()
+                except Exception:  # noqa: BLE001
+                    log.exception("overlay: wake callback failed")
+
+    def on_wake(self, cb: Callable[[], None]) -> None:  # type: ignore[override]
+        """Call ``cb`` (on the reader thread) when the user wakes Dobby."""
+        self._wake_callbacks.append(cb)
 
     def _send(self, op: str, wait: bool = False, timeout: Optional[float] = None, **fields: Any) -> bool:
         if not self._ensure_started():

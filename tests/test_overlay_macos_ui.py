@@ -167,6 +167,108 @@ def test_bar_off_and_auto_modes(make):
     assert not auto.pill.window.isVisible()
 
 
+# ----------------------------------------------------- waking Dobby up
+def _asleep(c):
+    c.last_action = time.monotonic() - 3600
+    c._refresh_pill()
+    assert c.pill.mode == "ready"
+
+
+def test_click_sleeping_bar_wakes_dobby(make):
+    c, out = make()
+    _asleep(c)
+    assert c.pill.view.toolTip() == "Click to wake Dobby"
+    w0 = c.pill.window.frame().size.width
+    c.on_pill_label()
+    assert c.pill.mode == "awake" and c.pill.label.stringValue().startswith("Dobby is awake")
+    assert c.pill.view.toolTip() == "Click to put Dobby to sleep"
+    assert c.pill.window.frame().size.width > w0
+    assert _events(out) == ["wake"]
+    assert c.pointer_visible and c.cursor is not None
+    assert all(p.pointer.opacity() == 1.0 for p in c.panels)
+    assert not c.pill.ducked  # the pointer lands clear of the bar
+
+
+def test_wake_shows_a_hidden_bar(make):
+    c, _ = make()
+    _asleep(c)
+    c.set_pill_hidden(True)
+    c.wake()
+    assert c.pill.window.isVisible() and c.pill.mode == "awake"
+
+
+def test_wake_keeps_an_existing_pointer_where_it_is(make):
+    c, _ = make()
+    _asleep(c)
+    c.cursor = (321.0, 456.0)
+    c.wake()
+    assert c.cursor == (321.0, 456.0) and c.pointer_visible
+
+
+def test_awake_falls_back_asleep(make):
+    c, out = make()
+    _asleep(c)
+    c.on_pill_label()
+    c.awake_until = time.monotonic() - 1
+    c.on_tick()
+    assert c.pill.mode == "ready" and _events(out) == ["wake", "sleep"]
+    assert not c.pointer_visible and c.cursor is None  # the wake pointer fades out
+
+
+def test_click_awake_bar_puts_dobby_to_sleep(make):
+    c, out = make()
+    _asleep(c)
+    c.on_pill_label()
+    c.on_pill_label()
+    assert c.pill.mode == "ready" and _events(out) == ["wake", "sleep"]
+
+
+def test_work_ends_awake_and_then_dobby_sleeps(make):
+    c, out = make()
+    _asleep(c)
+    c.wake()
+    c._mark_active()
+    assert c.pill.mode == "working" and c.awake_until == 0
+    assert _events(out) == ["wake", "sleep"]
+    c.last_action = time.monotonic() - 3600  # the work burst ends
+    c.on_tick()
+    assert c.pill.mode == "ready"
+
+
+def test_stop_while_awake_goes_back_to_sleep(make):
+    c, _ = make()
+    _asleep(c)
+    c.wake()
+    c.request_stop()
+    c.stopped_until = 0
+    c.on_tick()
+    assert c.pill.mode == "ready"
+
+
+def test_menu_offers_wake_and_sleep(make):
+    c, _ = make()
+    _asleep(c)
+    def titles():
+        menu = c._build_menu("Idle")
+        return [menu.itemAtIndex_(i) for i in range(menu.numberOfItems())]
+    wake = next(i for i in titles() if i.title() == "Wake Dobby")
+    assert wake.target() is c.target and wake.action() == "menuWake:"
+    c.target.menuWake_(None)
+    assert c.pill.mode == "awake"
+    sleep = next(i for i in titles() if i.title() == "Put Dobby to sleep")
+    assert sleep.action() == "menuSleep:"
+    c.target.menuSleep_(None)
+    assert c.pill.mode == "ready"
+
+
+def test_non_owner_helper_shows_awake(make):
+    a, _ = make()
+    b, _ = make()
+    assert not b.bar_owner.owned and not b.pill.window.isVisible()
+    b.wake()
+    assert b.pill.mode == "awake" and b.pill.window.isVisible()
+
+
 # ----------------------------------------------- clickable tag (the ▾)
 def _show_pointer(c, x=400.0, y=300.0):
     c.cursor = (x, y)

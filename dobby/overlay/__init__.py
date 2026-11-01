@@ -22,6 +22,9 @@ Resume), ``DOBBY_OVERLAY_TRAIL=0`` hides the numbered step trail,
 Allow/Deny prompts for risky steps and no pause when you touch the mouse or
 keyboard; only Stop / Pause halt Dobby.
 
+Click the sleeping control bar to wake Dobby: its pointer appears and the bar
+says it is ready for a task for ``DOBBY_OVERLAY_AWAKE_SECS`` (default 120).
+
 Hotkeys while Dobby runs: Ctrl+Option+Esc stops, Ctrl+Option+P pauses or
 resumes.
 """
@@ -78,6 +81,11 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     if env.get("DOBBY_OVERLAY_IDLE_SECS"):
         try:
             cfg["idle_secs"] = max(0.5, float(env["DOBBY_OVERLAY_IDLE_SECS"]))
+        except ValueError:
+            pass
+    if env.get("DOBBY_OVERLAY_AWAKE_SECS"):
+        try:
+            cfg["awake_secs"] = max(5.0, float(env["DOBBY_OVERLAY_AWAKE_SECS"]))
         except ValueError:
             pass
     if env.get("DOBBY_OVERLAY_TURBO", "").strip().lower() in _TRUE:

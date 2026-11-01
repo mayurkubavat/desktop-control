@@ -92,6 +92,7 @@ from Foundation import NSNotificationCenter, NSObject, NSTimer
 from PyObjCTools import AppHelper
 from Quartz import (
     CABasicAnimation,
+    CAKeyframeAnimation,
     CACurrentMediaTime,
     CAGradientLayer,
     CALayer,
@@ -120,7 +121,7 @@ from Quartz import (
 
 from . import geometry, protocol
 from .barlock import BAR_LOCK, BarOwner as _BarOwner
-from .menu import bar_click, bar_view, menu_entries, status_of
+from .menu import bar_click, bar_view, label_click, menu_entries, status_of
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "color": "#7C5CFF",  # Dobby violet; deliberately not Claude's orange
@@ -139,6 +140,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "takeover_resume": "auto",  # or "manual"
     "idle_secs": 2.0,
     "active_secs": 8.0,  # "working" lasts this long after an action
+    "awake_secs": 120.0,  # woken from the bar: stays awake this long without a task
     # Control bar at the top: "always" (stays while Dobby runs; the user can
     # hide it), "auto" (only while working) or "off".
     "pill": "always",
@@ -285,6 +287,12 @@ class _Target(NSObject):
     def pillHide_(self, _sender):
         self.owner.set_pill_hidden(True)
 
+    def menuWake_(self, _sender):
+        self.owner.wake()
+
+    def menuSleep_(self, _sender):
+        self.owner.sleep()
+
     def menuTogglePill_(self, _sender):
         self.owner.set_pill_hidden(not self.owner.pill_user_hidden)
 
@@ -366,6 +374,21 @@ class _ChipHotspot:
     def close(self) -> None:
         self.window.orderOut_(None)
         self.window.close()
+
+
+class _PillView(NSView):
+    """The bar's background: a click away from its buttons wakes Dobby."""
+
+    def acceptsFirstMouse_(self, _event):
+        return True
+
+    def mouseDown_(self, _event):
+        target = getattr(self, "dobby_target", None)
+        if target is not None:
+            target.owner.on_pill_label()
+
+
+_LABEL_TIPS = {"ready": "Click to wake Dobby", "awake": "Click to put Dobby to sleep"}
 
 
 class _PillButton(NSButton):
@@ -701,7 +724,8 @@ class _Pill:
         if not cfg.get("pill_in_recordings"):
             win.setSharingType_(NSWindowSharingNone)  # never in screenshots, so no capture blink
         win.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
-        view = NSView.alloc().initWithFrame_(((0, 0), (300, self.H)))
+        view = _PillView.alloc().initWithFrame_(((0, 0), (300, self.H)))
+        view.dobby_target = target
         view.setWantsLayer_(True)
         view.layer().setBackgroundColor_(_cg((0.11, 0.09, 0.16), 0.94))
         view.layer().setCornerRadius_(self.H / 2)
@@ -728,6 +752,9 @@ class _Pill:
     def show(self, mode: str, text: str, primary: str, secondary: str, rgb, dot_alpha: float = 1.0) -> None:
         self.mode = mode
         self.label.setStringValue_(text)
+        tip = _LABEL_TIPS.get(mode)
+        self.view.setToolTip_(tip)
+        self.label.setToolTip_(tip)
         self.label.sizeToFit()
         self.primary.set_label(primary)
         self.secondary.set_label(secondary)
@@ -763,6 +790,24 @@ class _Pill:
     def hide(self) -> None:
         self.mode = "hidden"
         self._apply_visibility()
+
+    def flash(self, rgb) -> None:
+        """Wake-up: the dot pops (1 → 1.6 → 1) and the border flashes."""
+        pop = CAKeyframeAnimation.animationWithKeyPath_("transform.scale")
+        pop.setValues_([1.0, 1.6, 1.0])
+        pop.setDuration_(0.45)
+        self.dot.addAnimation_forKey_(pop, "pop")
+        layer = self.view.layer()
+        border = CABasicAnimation.animationWithKeyPath_("borderColor")
+        border.setFromValue_(_cg(rgb, 1.0))
+        border.setToValue_(_cg(rgb, 0.7))
+        width = CABasicAnimation.animationWithKeyPath_("borderWidth")
+        width.setFromValue_(2.5)
+        width.setToValue_(1.0)
+        for a in (border, width):
+            a.setDuration_(0.6)
+            a.setTimingFunction_(CAMediaTimingFunction.functionWithName_(kCAMediaTimingFunctionEaseInEaseOut))
+            layer.addAnimation_forKey_(a, a.keyPath())
 
     def duck(self, ducked: bool) -> None:
         """Get out of the way while Dobby's pointer is near the pill."""
@@ -843,6 +888,8 @@ class OverlayController:
         self.last_user_input = 0.0
         self.pending_confirm: Optional[Tuple[Any, float]] = None  # (msg id, deadline)
         self.stopped_until = 0.0
+        self.awake_until = 0.0  # woken from the bar until then, or 0
+        self.wake_pointer = False  # the pointer is showing only because of a wake
         self.probe = _AXProbe()
         self.target = _Target.alloc().initWithOwner_(self)
         mode = self.cfg.get("pill", "always")
@@ -1168,6 +1215,8 @@ class OverlayController:
             self.takeover = False
             self.send_event("user_idle")
             self._refresh_pill()
+        if self.awake_until and now >= self.awake_until:
+            self.sleep()  # woken, but no task came
         if self.pill is not None:
             if self.pill.mode == "working" and now - self.last_action > float(self.cfg["active_secs"]):
                 self._refresh_pill()
@@ -1216,11 +1265,71 @@ class OverlayController:
         now = time.monotonic()
         was_sleeping = now - self.last_action > float(self.cfg["active_secs"])
         self.last_action = now
+        self.wake_pointer = False  # Dobby drives the pointer now
+        if self.awake_until:
+            self._end_awake()  # working takes over; afterwards Dobby sleeps
         if was_sleeping and self.pill_user_hidden:
             # Hidden while Dobby slept: bring the bar back now that it works.
             self.set_pill_hidden(False)
-        elif self.pill is not None and self.pill.mode in ("hidden", "ready"):
+        elif self.pill is not None and self.pill.mode in ("hidden", "ready", "awake"):
             self._refresh_pill()
+
+    def _awake(self) -> bool:
+        return bool(self.awake_until) and time.monotonic() < self.awake_until
+
+    def _end_awake(self) -> None:
+        self.awake_until = 0.0
+        self.send_event("sleep")
+
+    def on_pill_label(self) -> None:
+        """The user clicked the bar away from its buttons."""
+        if self.pill is None:
+            return
+        action = label_click(self.pill.mode)
+        if action == "wake":
+            self.wake()
+        elif action == "sleep":
+            self.sleep()
+
+    def wake(self) -> None:
+        """The user woke Dobby: show it is ready for a task."""
+        now = time.monotonic()
+        self.awake_until = now + max(5.0, float(self.cfg["awake_secs"]))
+        self.send_event("wake")
+        if self.pill_user_hidden:
+            self.set_pill_hidden(False)
+        self._refresh_pill()
+        if self.pill is not None and not self.reduce_motion:
+            self.pill.flash(self.colors["ok"])
+        if self.cursor is None:
+            self.cursor = self._below_bar()
+            self._place_pointer(self.cursor, 0)
+            self.wake_pointer = True
+        self.cursor_state = "idle"
+        self._refresh_tag()
+        self._set_pointer_visible(True)
+
+    def sleep(self) -> None:
+        if not self.awake_until:
+            return
+        self._end_awake()
+        if self.wake_pointer:
+            self.wake_pointer = False
+            self._set_pointer_visible(False)
+            self.cursor = None
+        self._refresh_pill()
+
+    def _below_bar(self) -> Tuple[float, float]:
+        """Global top-left point under the bar, clear of where the bar ducks."""
+        if self.pill is not None:
+            f = self.pill.window.frame()
+            x = f.origin.x + f.size.width / 2
+            y = self.primary_h - f.origin.y + 90
+        else:
+            screens = NSScreen.screens() or []
+            w = float(screens[0].frame().size.width) if screens else 800.0
+            x, y = w / 2, 130.0
+        return (x, y)
 
     def _refresh_pill(self) -> None:
         if self.pill is None or self.pending_confirm is not None:
@@ -1230,7 +1339,7 @@ class OverlayController:
             paused=self.paused, takeover=self.takeover, takeover_resume=self.cfg["takeover_resume"],
             working=time.monotonic() - self.last_action <= float(self.cfg["active_secs"]),
             turbo=self.turbo, current_mode=self.pill.mode, bar_mode=self.pill_mode,
-            owner=self.bar_owner.owned,
+            owner=self.bar_owner.owned, awake=self._awake(),
         )
         if view is None:
             self.pill.hide()
@@ -1294,6 +1403,8 @@ class OverlayController:
             self._answer_confirm(False)
         self.paused = False
         self.takeover = False
+        if self.awake_until:
+            self.sleep()
         self.send_event("stop")
         self.send_event("user_idle")
         self.intent_text = "Stopped"
@@ -1421,9 +1532,12 @@ class OverlayController:
     def _build_menu(self, status: str):
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
+        working = time.monotonic() - self.last_action <= float(self.cfg["active_secs"])
+        halted = self.paused or self.takeover
         for title, action, state in menu_entries(
-            status, self.steps, self.paused or self.takeover, self.turbo, self.user_visible,
+            status, self.steps, halted, self.turbo, self.user_visible,
             self.trail_on, None if self.pill is None else not self.pill_user_hidden,
+            awake=None if (working or halted) else self._awake(),
         ):
             if title == "-":
                 menu.addItem_(NSMenuItem.separatorItem())

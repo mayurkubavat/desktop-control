@@ -34,9 +34,15 @@ def status_of(paused: bool, takeover: bool, working: bool, turbo: bool) -> Tuple
 
 
 def menu_entries(status: str, steps: Iterable[str], halted: bool, turbo: bool, overlay_on: bool,
-                 trail_on: bool, bar_shown: Optional[bool]) -> List[Entry]:
-    """Menu items, top to bottom. ``bar_shown`` is None when there is no control bar."""
-    out: List[Entry] = [(f"Dobby: {status}", None, None), SEPARATOR, ("Recent steps", None, None)]
+                 trail_on: bool, bar_shown: Optional[bool], awake: Optional[bool] = False) -> List[Entry]:
+    """Menu items, top to bottom. ``bar_shown`` is None when there is no control bar.
+
+    ``awake`` is None while Dobby works (no wake/sleep entry then).
+    """
+    out: List[Entry] = [(f"Dobby: {status}", None, None), SEPARATOR]
+    if awake is not None:
+        out.append(("Put Dobby to sleep", "menuSleep:", None) if awake else ("Wake Dobby", "menuWake:", None))
+    out.append(("Recent steps", None, None))
     recent = list(reversed(list(steps)))
     out += [("   " + _short(line, 60), None, None) for line in (recent or ["(none yet)"])]
     out += [SEPARATOR,
@@ -58,11 +64,12 @@ BarView = Tuple[str, str, str, str, str, float]
 
 
 def bar_view(*, paused: bool, takeover: bool, takeover_resume: str, working: bool, turbo: bool,
-             current_mode: str, bar_mode: str, owner: bool) -> Optional[BarView]:
+             current_mode: str, bar_mode: str, owner: bool, awake: bool = False) -> Optional[BarView]:
     """What the control bar shows, or None to hide it.
 
     Colour keys: "caution", "ok", or "risk" (the current risk colour).
     ``current_mode`` "stopped" is kept until the helper's timer clears it.
+    ``awake``: the user woke Dobby from the bar; any helper shows it.
     An Allow/Deny prompt is shown separately and is never hidden.
     """
     if paused:
@@ -75,6 +82,9 @@ def bar_view(*, paused: bool, takeover: bool, takeover_resume: str, working: boo
     if working:
         label = "Dobby ⚡ Turbo" if turbo else "Dobby is working"
         return ("working", label + " · ⌃⌥⎋ stops", "Pause", "Stop", "risk", 1.0)
+    if awake:
+        label = "Dobby ⚡ Turbo · awake" if turbo else "Dobby is awake · ready for a task"
+        return ("awake", label, "Pause", "Stop", "ok", 1.0)
     if bar_mode == "always" and owner:
         label = "Dobby ⚡ Turbo · sleeping" if turbo else "Dobby is sleeping"
         return ("ready", label, "Pause", "Stop", "ok", 0.45)
@@ -89,8 +99,13 @@ def bar_click(mode: str, which: str) -> str:
         return "hide" if which == "secondary" else "dismiss"
     if which == "secondary":
         return "stop"
-    if mode in ("working", "ready"):
+    if mode in ("working", "ready", "awake"):
         return "pause"
     if mode in ("paused", "takeover"):
         return "resume"
     return "none"
+
+
+def label_click(mode: str) -> str:
+    """Action for a click on the bar itself, away from its buttons."""
+    return {"ready": "wake", "awake": "sleep"}.get(mode, "none")

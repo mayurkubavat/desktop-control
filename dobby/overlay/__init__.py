@@ -9,6 +9,8 @@ Enable/disable with ``DOBBY_OVERLAY=1|0``. Default: on for macOS, off under
 pytest, in cassette replay (``DOBBY_REPLAY=1``) and on other platforms.
 Look settings come from ``DOBBY_OVERLAY_COLOR`` (hex), ``DOBBY_OVERLAY_SPEED``
 (1.0 normal, 0 = no animation) and ``DOBBY_OVERLAY_LABEL``.
+``DOBBY_OVERLAY_CAPTURE_VISIBLE=0`` hides the overlay from screen recordings
+too (default: recordings and screen shares show it).
 """
 
 from __future__ import annotations
@@ -52,6 +54,8 @@ def overlay_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         cfg["color"] = env["DOBBY_OVERLAY_COLOR"]
     if env.get("DOBBY_OVERLAY_LABEL"):
         cfg["label"] = env["DOBBY_OVERLAY_LABEL"]
+    if env.get("DOBBY_OVERLAY_CAPTURE_VISIBLE", "").strip().lower() in _FALSE:
+        cfg["capture_visible"] = False
     if env.get("DOBBY_OVERLAY_SPEED"):
         try:
             cfg["speed"] = float(env["DOBBY_OVERLAY_SPEED"])

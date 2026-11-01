@@ -123,6 +123,7 @@ def test_overlay_config():
     cfg = overlay_config({"DOBBY_OVERLAY_COLOR": "#00ff00", "DOBBY_OVERLAY_SPEED": "0", "DOBBY_OVERLAY_LABEL": "D"})
     assert cfg == {"color": "#00ff00", "speed": 0.0, "label": "D"}
     assert overlay_config({"DOBBY_OVERLAY_SPEED": "fast"}) == {}
+    assert overlay_config({"DOBBY_OVERLAY_CAPTURE_VISIBLE": "0"}) == {"capture_visible": False}
 
 
 def test_wrap_hal_is_noop_when_disabled():

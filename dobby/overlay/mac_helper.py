@@ -35,6 +35,7 @@ from AppKit import (
     NSWindowCollectionBehaviorIgnoresCycle,
     NSWindowCollectionBehaviorStationary,
     NSWindowSharingNone,
+    NSWindowSharingReadOnly,
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
     NSWorkspace,
@@ -76,6 +77,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "glow_radius": 11.0,
     "glow_blur": 18.0,
     "track_hz": 10.0,
+    "capture_visible": True,  # False = hidden from every capture (macOS 27+)
 }
 
 BADGES = {"idle": "", "thinking": " •••", "typing": " ⌨", "waiting_user": " ✋"}
@@ -144,7 +146,9 @@ class _Panel:
             | NSWindowCollectionBehaviorFullScreenAuxiliary
             | NSWindowCollectionBehaviorIgnoresCycle
         )
-        win.setSharingType_(NSWindowSharingNone)  # best effort only
+        # Visible to screen recordings and screen sharing by default; Dobby's
+        # own captures hide the overlay via the hide/show handshake instead.
+        win.setSharingType_(NSWindowSharingReadOnly if cfg["capture_visible"] else NSWindowSharingNone)
         win.setReleasedWhenClosed_(False)
         win.setHidesOnDeactivate_(False)
         win.setFloatingPanel_(True)

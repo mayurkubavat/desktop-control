@@ -11,6 +11,7 @@ Implements the System 1 / System 2 bicameral control paradigm:
 
 from __future__ import annotations
 
+import inspect
 import json
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -96,6 +97,37 @@ class BicameralStepController:
         self.local_gemma = local_gemma_client
         self.cloud_vlm = cloud_vlm_client
         self.min_local_confidence = min_local_confidence
+
+    def _hard_escalation(
+        self,
+        expected: Dict[str, Any],
+        ax_diff: Dict[str, Any],
+    ) -> Optional[str]:
+        """Predicates that skip the local model and go to the cloud planner.
+
+        Benign modals and async promotion of a known long job do not escalate.
+        """
+        modal = expected.get("observed_modal")
+        allow = set(expected.get("allow_modals") or [])
+        risk = expected.get("modal_risk")
+        if modal and modal not in allow and risk != "BENIGN_DISMISSIBLE":
+            return f"unexpected modal: {modal} ({risk or 'unclassified'})"
+        phase = expected.get("quiescence_phase")
+        if expected.get("requires_visual_change") and phase in ("SETTLING", "NO_REACTION") and not expected.get("dirty_area"):
+            return "visual stall: no damage before the reaction deadline"
+        if (
+            expected.get("expect_ax_change")
+            and expected.get("stall_deadline_exceeded")
+            and not ax_diff.get("changed")
+        ):
+            return "structural stall: accessibility tree did not change"
+        if phase == "ASYNC_PROMOTED" and not expected.get("allow_async_promotion", True):
+            return "hang: busy cursor past the quiescence ceiling"
+        if expected.get("grounding_miss"):
+            return "grounding miss"
+        if expected.get("contract_failed"):
+            return "post-condition contract failed after local retry"
+        return None
 
     def dispatch_hal_action(self, action_name: str, args: Dict[str, Any]) -> Any:
         """Dispatches an action to the underlying HAL."""
@@ -196,17 +228,29 @@ class BicameralStepController:
             except Exception:
                 pass
 
-        # 3. Tier 1: Local System 1 SLM Evaluation (Gemma 3 4B-IT, <90ms, $0)
+        hard = self._hard_escalation(expected_outcome, ax_diff)
         local_eval: Optional[Dict[str, Any]] = None
-        if self.local_gemma is not None:
+        if hard:
+            local_eval = {"verified": False, "confidence": 0.0, "reason": hard}
+        elif self.local_gemma is not None:
             try:
                 if hasattr(self.local_gemma, "evaluate_step"):
-                    local_eval = self.local_gemma.evaluate_step(
-                        action=action_name,
-                        args=action_args,
-                        expected=expected_outcome,
-                        ax_diff=ax_diff,
-                    )
+                    image = None
+                    if hasattr(self.hal, "capture_screen"):
+                        try:
+                            image = self.hal.capture_screen()
+                        except Exception:
+                            image = None
+                    fn = self.local_gemma.evaluate_step
+                    kwargs: Dict[str, Any] = {
+                        "action": action_name,
+                        "args": action_args,
+                        "expected": expected_outcome,
+                        "ax_diff": ax_diff,
+                    }
+                    if "image" in inspect.signature(fn).parameters:
+                        kwargs["image"] = image
+                    local_eval = fn(**kwargs)
                 elif hasattr(self.local_gemma, "verify_step"):
                     local_eval = self.local_gemma.verify_step(
                         action=action_name,
@@ -269,6 +313,7 @@ class BicameralStepController:
         max_tokens: int = 12000,
         keep_last_n: int = 2,
         local_compressor_fn: Optional[Callable[[str], str]] = None,
+        force: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Compresses turns 1..N-keep_last_n into an 8-part invariant structured state checkpoint.
@@ -282,7 +327,9 @@ class BicameralStepController:
         total_text = "".join(str(m.get("content", "")) for m in messages)
         est_tokens = len(total_text) // 4
 
-        if est_tokens <= max_tokens or len(messages) <= keep_last_n + 1:
+        if len(messages) <= keep_last_n + 1:
+            return messages
+        if not force and est_tokens <= max_tokens:
             return messages
 
         # Separate system message, turns to compact, and recent turns
@@ -294,36 +341,26 @@ class BicameralStepController:
         recent_turns = messages[end_idx:]
 
         serialized_turns = json.dumps(turns_to_compact, indent=2)
+        checkpoint: Optional[StateCheckpoint] = None
 
         if local_compressor_fn:
             prompt = f"{COMPACT_PROMPT_TEMPLATE}\n\nHistory to compress:\n{serialized_turns}"
-            compressed_body = local_compressor_fn(prompt)
+            try:
+                compressed_body = local_compressor_fn(prompt)
+            except Exception:
+                compressed_body = ""
+            checkpoint = _checkpoint_from_text(compressed_body)
+            if checkpoint is None:
+                body, checkpoint = _heuristic_checkpoint(turns_to_compact)
+                compressed_body = compressed_body or body
         else:
-            # Deterministic heuristic compaction adhering strictly to the 8-part schema
-            actions = []
-            errors = []
-            for t in turns_to_compact:
-                content = str(t.get("content", ""))
-                if "error" in content.lower() or "fail" in content.lower():
-                    errors.append(content[:120].strip())
-                elif "action" in content.lower() or "click" in content.lower() or "type" in content.lower():
-                    actions.append(content[:80].strip())
-
-            compressed_body = (
-                f"### [COMPACTED TRAJECTORY STATE - {len(turns_to_compact)} TURNS COMPRESSED]\n"
-                f"1. [USER_INSTRUCTIONS]: Continue active task according to original user goal.\n"
-                f"2. [TASK_TEMPLATE]: Progressing sub-goals: {len(actions)} actions executed.\n"
-                f"3. [CONSTRAINTS]: Read-only / failsafe bounds maintained.\n"
-                f"4. [ACTIONS_TAKEN]: {'; '.join(actions[-5:]) if actions else 'Routine navigation steps'}\n"
-                f"5. [ERRORS_AND_FIXES]: {'; '.join(errors[-2:]) if errors else 'None'}\n"
-                f"6. [PROGRESS_METRICS]: Completed {len(turns_to_compact)} turns compacted.\n"
-                f"7. [CURRENT_SCREEN_STATE]: Settled post-action state.\n"
-                f"8. [NEXT_IMMEDIATE_STEP]: Inspect latest raw turns and proceed with next planned primitive.\n"
-            )
+            body, checkpoint = _heuristic_checkpoint(turns_to_compact)
+            compressed_body = body
 
         compacted_msg = {
             "role": "user",
             "content": f"[STATE COMPACTOR OUTPUT]\n{compressed_body}",
+            "checkpoint": checkpoint.model_dump(),
         }
 
         result = []
@@ -332,4 +369,72 @@ class BicameralStepController:
         result.append(compacted_msg)
         result.extend(recent_turns)
         return result
+
+
+def _heuristic_checkpoint(turns: List[Dict[str, Any]]) -> tuple[str, StateCheckpoint]:
+    """Builds the 8-part text the compactor tests lock, plus a structured checkpoint."""
+    actions: List[str] = []
+    errors: List[str] = []
+    for turn in turns:
+        content = str(turn.get("content", ""))
+        if "error" in content.lower() or "fail" in content.lower():
+            errors.append(content[:120].strip())
+        elif "action" in content.lower() or "click" in content.lower() or "type" in content.lower():
+            actions.append(content[:80].strip())
+    actions_line = "; ".join(actions[-5:]) if actions else "Routine navigation steps"
+    errors_line = "; ".join(errors[-2:]) if errors else "None"
+    body = (
+        f"### [COMPACTED TRAJECTORY STATE - {len(turns)} TURNS COMPRESSED]\n"
+        f"1. [USER_INSTRUCTIONS]: Continue active task according to original user goal.\n"
+        f"2. [TASK_TEMPLATE]: Progressing sub-goals: {len(actions)} actions executed.\n"
+        f"3. [CONSTRAINTS]: Read-only / failsafe bounds maintained.\n"
+        f"4. [ACTIONS_TAKEN]: {actions_line}\n"
+        f"5. [ERRORS_AND_FIXES]: {errors_line}\n"
+        f"6. [PROGRESS_METRICS]: Completed {len(turns)} turns compacted.\n"
+        f"7. [CURRENT_SCREEN_STATE]: Settled post-action state.\n"
+        f"8. [NEXT_IMMEDIATE_STEP]: Inspect latest raw turns and proceed with next planned primitive.\n"
+    )
+    checkpoint = StateCheckpoint(
+        user_instructions="Continue active task according to original user goal.",
+        task_template=[f"Progressing sub-goals: {len(actions)} actions executed."],
+        constraints=["Read-only / failsafe bounds maintained."],
+        actions_taken=actions[-5:] or ["Routine navigation steps"],
+        errors_and_fixes=errors[-2:] or ["None"],
+        progress_metrics=f"Completed {len(turns)} turns compacted.",
+        current_screen_state="Settled post-action state.",
+        next_immediate_step="Inspect latest raw turns and proceed with next planned primitive.",
+        compressor="heuristic",
+        covers_turns=(0, len(turns)),
+    )
+    return body, checkpoint
+
+
+def _checkpoint_from_text(text: str) -> Optional[StateCheckpoint]:
+    try:
+        data = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return StateCheckpoint(**data)
+    except Exception:
+        return None
+
+
+def _render_checkpoint(checkpoint: StateCheckpoint) -> str:
+    actions = "; ".join(checkpoint.actions_taken) if checkpoint.actions_taken else "Routine navigation steps"
+    errors = "; ".join(checkpoint.errors_and_fixes) if checkpoint.errors_and_fixes else "None"
+    tasks = "; ".join(checkpoint.task_template) if checkpoint.task_template else "Progressing sub-goals."
+    constraints = "; ".join(checkpoint.constraints) if checkpoint.constraints else "Read-only / failsafe bounds maintained."
+    return (
+        f"1. [USER_INSTRUCTIONS]: {checkpoint.user_instructions}\n"
+        f"2. [TASK_TEMPLATE]: {tasks}\n"
+        f"3. [CONSTRAINTS]: {constraints}\n"
+        f"4. [ACTIONS_TAKEN]: {actions}\n"
+        f"5. [ERRORS_AND_FIXES]: {errors}\n"
+        f"6. [PROGRESS_METRICS]: {checkpoint.progress_metrics}\n"
+        f"7. [CURRENT_SCREEN_STATE]: {checkpoint.current_screen_state}\n"
+        f"8. [NEXT_IMMEDIATE_STEP]: {checkpoint.next_immediate_step}\n"
+    )
 

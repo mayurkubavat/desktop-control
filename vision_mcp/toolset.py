@@ -239,6 +239,7 @@ class ToolSetManager:
         tool_name: str,
         payload: Dict[str, Any],
         output_mode_override: Optional[OutputMode | str] = None,
+        force_offload: bool = False,
     ) -> Dict[str, Any]:
         """
         Intercepts tool payloads and offloads heavy structures out-of-band when configured.
@@ -262,16 +263,14 @@ class ToolSetManager:
         tool = self._registry.get(tool_name)
         threshold = tool.max_inline_tokens if tool else self._max_inline_tokens
 
-        if effective_mode == OutputMode.INLINE or est_tokens <= threshold:
+        if not force_offload and (effective_mode == OutputMode.INLINE or est_tokens <= threshold):
             return payload
 
-        # Offload to disk/tmpfs
         h = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
         filename = f"{tool_name}_{h}.json"
         artifact_path = self._state_dir / filename
         artifact_path.write_text(serialized, encoding="utf-8")
 
-        # Construct compact preview
         preview_fields = [
             "status",
             "active_window",
@@ -287,23 +286,57 @@ class ToolSetManager:
         compact_preview: Dict[str, Any] = {
             k: payload[k] for k in preview_fields if k in payload
         }
+        sample_lines: List[str] = []
         if "lines" in payload and isinstance(payload["lines"], list):
-            compact_preview["sample_lines"] = [
-                str(item.get("text", item))[:60] for item in payload["lines"][:3]
-            ]
+            sample_lines = [str(item.get("text", item))[:60] for item in payload["lines"][:3]]
+            compact_preview["sample_lines"] = sample_lines
         if "nodes" in payload and isinstance(payload["nodes"], list):
             compact_preview["nodes_count"] = len(payload["nodes"])
+            sample_lines = sample_lines or [
+                str(item.get("name", item))[:60] for item in payload["nodes"][:3]
+            ]
 
-        return {
+        uri = f"mcp://desktop-control/state/{filename}"
+        header = {
+            "ok": True,
+            "window": payload.get("active_window") or payload.get("window_title") or "",
+            "kind": tool_name,
+            "counts": {
+                "nodes": compact_preview.get("nodes_count", payload.get("count")),
+            },
+            "preview": sample_lines,
+            "uri": uri,
+            "bytes": len(serialized.encode("utf-8")),
+        }
+        result: Dict[str, Any] = {
             "offloaded": True,
             "output_mode": effective_mode.value,
-            "estimated_tokens_saved": max(0, est_tokens - 60),
+            "estimated_tokens_saved": max(0, est_tokens - 80),
             "original_estimated_tokens": est_tokens,
-            "file_path": str(artifact_path),
-            "resource_uri": f"mcp://desktop-control/state/{filename}",
+            "resource_uri": uri,
+            "uri": uri,
             "preview": compact_preview,
-            "read_hint": f"Call read_file(path='{artifact_path}') or grep target keys on demand.",
+            "header": header,
+            "bytes": header["bytes"],
         }
+        if effective_mode == OutputMode.RESOURCE:
+            result["read_hint"] = f"resources/read {uri}"
+        else:
+            result["file_path"] = str(artifact_path)
+            result["read_hint"] = f"Call read_file(path='{artifact_path}') or grep target keys on demand."
+        return result
+
+    def resolve_state_file(self, name: str) -> Path:
+        """Returns a state file inside the state dir. Rejects paths that escape it."""
+        if not name or "/" in name or "\\" in name or name.startswith("."):
+            raise ValueError(f"invalid state name: {name}")
+        path = (self._state_dir / name).resolve()
+        root = self._state_dir.resolve()
+        if path.parent != root:
+            raise ValueError(f"state path escapes {root}")
+        if not path.is_file():
+            raise FileNotFoundError(name)
+        return path
 
     def cleanup_old_state(self, max_age_seconds: int = 3600) -> int:
         """Deletes state payload files older than max_age_seconds."""

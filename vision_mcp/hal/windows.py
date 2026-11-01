@@ -5,7 +5,8 @@ from typing import Tuple, List, Optional
 from PIL import Image
 
 from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.types import WindowInfo, BoundingBox
+from vision_mcp.hal.errors import CapabilityUnavailable
+from vision_mcp.types import WindowInfo, BoundingBox, DisplayMetrics, DisplayTopology
 
 
 class WindowsHAL(IDesktopHAL):
@@ -31,11 +32,40 @@ class WindowsHAL(IDesktopHAL):
         except Exception:
             pass
 
+    def _user32(self):
+        import ctypes
+        return ctypes.windll.user32
+
+    def display_topology(self) -> DisplayTopology:
+        """Per-monitor logical size. scale is dpi/96 under Per-Monitor V2."""
+        if sys.platform != "win32":
+            return DisplayTopology(
+                displays=[DisplayMetrics(display_id="primary", origin=(0, 0), size=(1920, 1080), scale=1.0)],
+                primary_id="primary",
+            )
+        user32 = self._user32()
+        width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        dpi = 96
+        try:
+            dpi = int(user32.GetDpiForSystem())
+        except Exception:
+            pass
+        return DisplayTopology(
+            displays=[
+                DisplayMetrics(
+                    display_id="primary",
+                    origin=(int(user32.GetSystemMetrics(76)), int(user32.GetSystemMetrics(77))),
+                    size=(int(width), int(height)),
+                    scale=dpi / 96.0,
+                )
+            ],
+            primary_id="primary",
+        )
+
     def get_screen_size(self) -> Tuple[int, int]:
         if sys.platform != "win32":
             return (1920, 1080)
-        import ctypes
-        user32 = ctypes.windll.user32
+        user32 = self._user32()
         return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
     def capture_screen(self, region: Optional[Tuple[int, int, int, int]] = None) -> Image.Image:
@@ -61,16 +91,46 @@ class WindowsHAL(IDesktopHAL):
         ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
+    def _send_mouse(self, flags: int, data: int = 0, dx: int = 0, dy: int = 0) -> None:
+        """SendInput absolute or button event. MOUSEEVENTF_VIRTUALDESK covers other monitors."""
+        import ctypes
+
+        user32 = self._user32()
+        extra = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
+
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", ctypes.c_long),
+                ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", extra),
+            ]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("mi", MOUSEINPUT)]
+
+        inp = INPUT(type=0, mi=MOUSEINPUT(dx, dy, data, flags, 0, 0))
+        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
     def mouse_move(self, x: int, y: int) -> None:
         if sys.platform != "win32":
             return
-        import ctypes
-        ctypes.windll.user32.SetCursorPos(x, y)
+        user32 = self._user32()
+        vx = int(user32.GetSystemMetrics(76))
+        vy = int(user32.GetSystemMetrics(77))
+        vw = max(int(user32.GetSystemMetrics(78)) - 1, 1)
+        vh = max(int(user32.GetSystemMetrics(79)) - 1, 1)
+        ax = int((x - vx) * 65535 / vw)
+        ay = int((y - vy) * 65535 / vh)
+        # MOVE | ABSOLUTE | VIRTUALDESK
+        self._send_mouse(0x0001 | 0x8000 | 0x4000, dx=ax, dy=ay)
 
     def mouse_click(self, x: int, y: int, button: str = "left", click_count: int = 1) -> None:
+        if sys.platform != "win32":
+            return
         self.mouse_move(x, y)
-        # Windows Win32 SendInput or mouse_event
-        import ctypes
         import time
         flags = {
             "left": (0x0002, 0x0004),
@@ -78,25 +138,26 @@ class WindowsHAL(IDesktopHAL):
             "middle": (0x0020, 0x0040),
         }.get(button, (0x0002, 0x0004))
         for _ in range(click_count):
-            ctypes.windll.user32.mouse_event(flags[0], 0, 0, 0, 0)
+            self._send_mouse(flags[0])
             time.sleep(0.01)
-            ctypes.windll.user32.mouse_event(flags[1], 0, 0, 0, 0)
+            self._send_mouse(flags[1])
             time.sleep(0.01)
 
     def mouse_drag(self, start_x: int, start_y: int, end_x: int, end_y: int, duration_sec: float = 0.3) -> None:
+        if sys.platform != "win32":
+            return
         self.mouse_move(start_x, start_y)
-        import ctypes
         import time
-        ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
+        self._send_mouse(0x0002)
         try:
             steps = 30
             for i in range(1, steps + 1):
                 cur_x = int(start_x + (end_x - start_x) * (i / steps))
                 cur_y = int(start_y + (end_y - start_y) * (i / steps))
-                ctypes.windll.user32.SetCursorPos(cur_x, cur_y)
+                self.mouse_move(cur_x, cur_y)
                 time.sleep(duration_sec / steps)
         finally:
-            ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
+            self._send_mouse(0x0004)
 
     def mouse_scroll(self, dx: int, dy: int) -> None:
         if sys.platform != "win32":
@@ -128,16 +189,16 @@ class WindowsHAL(IDesktopHAL):
             kb.release(k)
 
     def list_windows(self) -> List[WindowInfo]:
-        """Queries Windows using Win32 EnumWindows or pywinauto."""
-        return []
+        """UIA window enumeration is not implemented. Fail closed."""
+        raise CapabilityUnavailable("Windows UIA window enumeration is not implemented")
 
     def get_active_window(self) -> Optional[WindowInfo]:
         """Returns the currently active window on Windows."""
-        windows = self.list_windows()
-        for win in windows:
-            if win.is_active:
-                return win
-        return None
+        raise CapabilityUnavailable("Windows UIA active-window query is not implemented")
 
     def focus_window(self, window_id: str) -> bool:
-        return False
+        raise CapabilityUnavailable("Windows SetForegroundWindow is not implemented")
+
+
+def build_hal() -> WindowsHAL:
+    return WindowsHAL()

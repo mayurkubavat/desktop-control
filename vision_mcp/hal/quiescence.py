@@ -13,7 +13,7 @@ import ctypes
 import ctypes.util
 from ctypes import c_int, c_ulong, c_short, c_ushort, c_char_p, POINTER, Structure
 
-from vision_mcp.types import ExecutionPhase
+from vision_mcp.types import ExecutionPhase, QuiescenceReport
 
 logger = logging.getLogger(__name__)
 
@@ -249,10 +249,9 @@ class X11QuiescenceMonitor:
         total_damage = 0
 
         if not self.is_available:
-            # Fallback for environments without XDamage: sleep quiescent window and return
             time.sleep(quiescence_window_ms / 1000.0)
             elapsed_ms = (time.monotonic() - t_start) * 1000.0
-            return (ExecutionPhase.QUIESCENT, elapsed_ms, 0)
+            return (ExecutionPhase.SLEEP_FALLBACK, elapsed_ms, 0)
 
         # Clear pre-action residual damage
         self.consume_damage_area()
@@ -303,6 +302,24 @@ class X11QuiescenceMonitor:
 
             time.sleep(poll_interval_sec)
 
+    def arm(self) -> None:
+        """Clears damage that accumulated before the action under test."""
+        self.consume_damage_area()
+
+    def wait(
+        self,
+        quiescence_window_ms: int = 180,
+        initial_timeout_ms: int = 1500,
+        max_total_timeout_ms: int = 15000,
+    ) -> QuiescenceReport:
+        phase, elapsed, dirty = self.wait_for_quiescence(
+            quiescence_window_ms=quiescence_window_ms,
+            initial_timeout_ms=initial_timeout_ms,
+            max_total_timeout_ms=max_total_timeout_ms,
+        )
+        cursor, _ = self.get_cursor_state()
+        return QuiescenceReport(phase=phase, elapsed_ms=elapsed, dirty_area=dirty, cursor=cursor)
+
     def close(self) -> None:
         """Cleans up X11 and damage resources."""
         try:
@@ -321,3 +338,50 @@ class X11QuiescenceMonitor:
 
     def __del__(self) -> None:
         self.close()
+
+
+class SleepQuiescenceMonitor:
+    """Platforms without a damage stream. A wait is SLEEP_FALLBACK, not QUIESCENT."""
+
+    def __init__(self, platform: str = "") -> None:
+        self.platform = platform
+        self.is_available = False
+
+    def arm(self) -> None:
+        return None
+
+    def consume_damage_area(self) -> int:
+        return 0
+
+    def get_cursor_state(self) -> Tuple[str, int]:
+        return ("unknown", 0)
+
+    def is_cursor_busy(self) -> bool:
+        return False
+
+    def wait_for_quiescence(
+        self,
+        quiescence_window_ms: int = 180,
+        initial_timeout_ms: int = 1500,
+        max_total_timeout_ms: int = 15000,
+        poll_interval_sec: float = 0.025,
+    ) -> Tuple[ExecutionPhase, float, int]:
+        time.sleep(quiescence_window_ms / 1000.0)
+        return (ExecutionPhase.SLEEP_FALLBACK, float(quiescence_window_ms), 0)
+
+    def wait(
+        self,
+        quiescence_window_ms: int = 180,
+        initial_timeout_ms: int = 1500,
+        max_total_timeout_ms: int = 15000,
+    ) -> QuiescenceReport:
+        phase, elapsed, dirty = self.wait_for_quiescence(
+            quiescence_window_ms=quiescence_window_ms,
+            initial_timeout_ms=initial_timeout_ms,
+            max_total_timeout_ms=max_total_timeout_ms,
+        )
+        return QuiescenceReport(phase=phase, elapsed_ms=elapsed, dirty_area=dirty, cursor="unknown")
+
+
+MacQuiescenceMonitor = SleepQuiescenceMonitor
+WinQuiescenceMonitor = SleepQuiescenceMonitor

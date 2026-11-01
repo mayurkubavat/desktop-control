@@ -116,7 +116,7 @@ def test_quiescence_monitor_fallback_on_invalid_display():
         initial_timeout_ms=100,
         max_total_timeout_ms=500,
     )
-    assert phase == ExecutionPhase.QUIESCENT
+    assert phase == ExecutionPhase.SLEEP_FALLBACK
     assert elapsed >= 40.0
     assert damage == 0
 

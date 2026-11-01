@@ -9,7 +9,7 @@ from typing import Optional, Tuple, Dict, Any, List
 from PIL import Image
 
 from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.types import WindowInfo, BoundingBox, UIElement
+from vision_mcp.types import WindowInfo, BoundingBox, UIElement, DisplayTopology
 
 
 class WindowClipper:
@@ -42,13 +42,23 @@ class WindowClipper:
         self,
         bbox: BoundingBox,
         screen_size: Tuple[int, int],
+        topology: Optional[DisplayTopology] = None,
     ) -> Tuple[int, int, int, int]:
-        """Ensures window bounding box does not exceed physical display boundaries."""
-        sw, sh = screen_size
-        x = max(0, min(bbox.x, sw - 1))
-        y = max(0, min(bbox.y, sh - 1))
-        w = max(1, min(bbox.width, sw - x))
-        h = max(1, min(bbox.height, sh - y))
+        """Clips a window box to the virtual desktop, which may start left of the origin."""
+        topology = topology if topology is not None else getattr(self.hal, "topology", None)
+        if isinstance(topology, DisplayTopology) and topology.displays:
+            min_x = min(d.origin[0] for d in topology.displays)
+            min_y = min(d.origin[1] for d in topology.displays)
+            max_x = max(d.origin[0] + d.size[0] for d in topology.displays)
+            max_y = max(d.origin[1] + d.size[1] for d in topology.displays)
+        else:
+            sw, sh = screen_size
+            min_x, min_y = 0, 0
+            max_x, max_y = sw, sh
+        x = max(min_x, min(bbox.x, max_x - 1))
+        y = max(min_y, min(bbox.y, max_y - 1))
+        w = max(1, min(bbox.width, max_x - x))
+        h = max(1, min(bbox.height, max_y - y))
         return (x, y, w, h)
 
     def filter_and_offset_elements(

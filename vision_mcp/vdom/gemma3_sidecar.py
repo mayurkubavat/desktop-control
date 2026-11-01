@@ -8,6 +8,7 @@ token overhead. Replies are constrained to JSON schemas via vision_mcp.gemma.cli
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections import OrderedDict
@@ -457,6 +458,42 @@ class Gemma3Grounder:
             "evidence": str(data.get("evidence", ""))[:300],
             "source": "gemma",
         }
+
+    def evaluate_step(
+        self,
+        action: str,
+        args: Optional[Dict[str, Any]] = None,
+        expected: Optional[Dict[str, Any]] = None,
+        ax_diff: Optional[Dict[str, Any]] = None,
+        image: Optional[Image.Image] = None,
+    ) -> Dict[str, Any]:
+        """Tier-1 check. Confidence below 0.82 is not a pass."""
+        expected = expected or {}
+        question = expected.get("visual_question") or f"Did the action '{action}' succeed?"
+        if image is None:
+            return {"verified": False, "confidence": 0.0, "reason": "no crop for local verification"}
+        result = self.ask_yes_no(image, str(question))
+        confidence = float(result.get("confidence") or 0.0)
+        verified = result.get("answer") is True and confidence >= 0.82
+        return {
+            "verified": verified,
+            "confidence": confidence,
+            "reason": str(result.get("evidence") or result.get("source") or ""),
+        }
+
+    def compress_history(self, prompt: str) -> str:
+        """Asks local Gemma for a JSON StateCheckpoint and returns that JSON."""
+        from vision_mcp.agent_loop.bicameral import StateCheckpoint
+
+        data = self.client.chat_json(
+            model=self.text_model,
+            system="Compress the trajectory into the schema. Emit JSON only.",
+            user=prompt,
+            schema=StateCheckpoint.model_json_schema(),
+            timeout=self.timeout,
+            max_tokens=400,
+        )
+        return json.dumps(StateCheckpoint(**data).model_dump())
 
     def fuse_with_vdom(
         self,

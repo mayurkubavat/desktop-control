@@ -14,8 +14,12 @@ from typing import Optional, List, Dict, Any
 
 try:
     from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
 except ImportError:
     from mcp.server.fastmcp import FastMCP as MCPServer
+
+    class ToolError(RuntimeError):
+        pass
 
 from vision_mcp.hal.factory import get_desktop_hal
 from vision_mcp.agent_loop.controller import FeedbackLoopController
@@ -24,8 +28,37 @@ from vision_mcp.types import FindElementResult, DiagnosticsResult
 from vision_mcp.config import CONFIG
 from vision_mcp.toolset import ToolSetManager, ToolDefinition, OutputMode
 
-# Initialize Server, Feedback Loop Controller, and ToolSetManager
-mcp_server = MCPServer("desktop-control")
+_TOOL_LIST_NOTIFICATIONS: List[str] = []
+
+
+def _notify_tools_changed() -> None:
+    """Records notifications/tools/list_changed and forwards it when a session exists."""
+    _TOOL_LIST_NOTIFICATIONS.append("notifications/tools/list_changed")
+    session = getattr(mcp_server, "active_session", None)
+    if session is not None and hasattr(session, "send_tool_list_changed"):
+        return session.send_tool_list_changed()
+    return None
+
+
+class DesktopControlServer(MCPServer):
+    """MCP server whose tools/list follows the active domain profile."""
+
+    active_session: Any = None
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        active = {schema["name"] for schema in toolset_manager.get_active_mcp_schemas()}
+        return [tool for tool in tools if tool.name in active]
+
+    async def call_tool(self, name, arguments, context=None):
+        if context is not None and getattr(context, "session", None) is not None:
+            self.active_session = context.session
+        if not toolset_manager.is_tool_active(name):
+            raise ToolError(f"Tool '{name}' is outside the active tool profile. Call manage_toolsets to enable it.")
+        return await super().call_tool(name, arguments, context)
+
+
+mcp_server = DesktopControlServer("desktop-control")
 hal = get_desktop_hal()
 controller = FeedbackLoopController(hal)
 trajectory_engine = TrajectoryEngine(controller)
@@ -35,6 +68,7 @@ toolset_manager = ToolSetManager(
     output_mode=OutputMode(CONFIG.output_mode),
     max_inline_tokens=CONFIG.output_file_threshold_tokens,
     state_dir=CONFIG.state_dir,
+    notify_tools_changed_cb=_notify_tools_changed,
 )
 
 # Register tools with ToolSetManager for dynamic capability gating
@@ -66,6 +100,7 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "resolve_modal_dialog": ("developer", "Clicks button on modal dialog"),
     "manage_cache": ("developer", "Manages self-healing action cache"),
     "execute_trajectory": ("developer", "Executes compound deterministic trajectory"),
+    "compact_history": ("developer", "Compacts trajectory history into an 8-part checkpoint"),
     # Advanced vision
     "configure_vision": ("advanced_vision", "Configures runtime vision parameters"),
     "get_vision_diagnostics": ("advanced_vision", "Returns perception system health"),
@@ -102,25 +137,23 @@ def take_screenshot(
     clip_to_active_window: bool = False,
     strategy_override: Optional[str] = None,
     zoom_factor: float = 1.0,
+    include_image: bool = False,
 ) -> Dict[str, Any]:
     """
-    Captures the desktop screen with visual perception, Set-of-Marks, and optional per-window clipping.
+    Captures the desktop screen with visual perception and Set-of-Marks.
+
+    The default payload is the mark list (id, role, name, center) and a resource
+    URI for the image. Pass include_image=True to inline image_base64.
 
     Args:
-        mode: Grounding mode:
-              - 'annotated_som': Overlays Set-of-Marks badges using active grounding strategy (defaults to ensemble).
-              - 'annotated_cv': Forces pure Computer Vision edge/contour and text region detection.
-              - 'cursor_only': Screenshot showing current mouse pointer position.
-              - 'raw': Clean desktop screenshot without annotations.
-        app_filter: Optional application title or process filter for AT-SPI introspection.
-        region: Optional [x, y, width, height] bounding box. If None, captures primary screen.
-        window_id: Optional window identifier to clip perception strictly to window bounds (60-80% token reduction).
-        clip_to_active_window: If True, automatically clips capture to currently focused window bounds.
-        strategy_override: Optional strategy hotswap: 'ensemble', 'semantic', 'cv', or 'template'.
-        zoom_factor: Optional zoom magnification (e.g. 2.0) for coarse-to-fine inspection of small targets.
-
-    Returns:
-        Dictionary containing image_base64, marks, resolution, scale factor, and zoom factor.
+        mode: 'annotated_som', 'annotated_cv', 'cursor_only', or 'raw'.
+        app_filter: Optional application title or process filter.
+        region: Optional [x, y, width, height] bounding box.
+        window_id: Optional window identifier to clip perception to.
+        clip_to_active_window: Crop to the focused window.
+        strategy_override: 'ensemble', 'semantic', 'cv', or 'template'.
+        zoom_factor: Magnification for a coarse-to-fine crop.
+        include_image: When true, include image_base64 in the tool result.
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
     result = controller.capture_state(
@@ -132,7 +165,52 @@ def take_screenshot(
         strategy_override=strategy_override,
         zoom_factor=zoom_factor,
     )
-    return result.model_dump()
+    return _screenshot_summary(result.model_dump(), include_image)
+
+
+def _screenshot_summary(payload: Dict[str, Any], include_image: bool) -> Dict[str, Any]:
+    """Marks header by default. The image bytes are a resource unless inlined."""
+    marks = []
+    for mark in payload.get("marks") or []:
+        bbox = mark.get("bbox") or {}
+        cx = int(bbox.get("x", 0)) + int(bbox.get("width", 0)) // 2
+        cy = int(bbox.get("y", 0)) + int(bbox.get("height", 0)) // 2
+        marks.append({
+            "id": mark.get("id"),
+            "role": mark.get("role"),
+            "name": mark.get("name"),
+            "center": [cx, cy],
+        })
+    summary: Dict[str, Any] = {
+        "ok": True,
+        "kind": "screenshot",
+        "width": payload["width"],
+        "height": payload["height"],
+        "scale_factor": payload["scale_factor"],
+        "marks": marks,
+        "marks_count": len(marks),
+        "mime_type": payload.get("mime_type", "image/jpeg"),
+    }
+    image_body = {
+        "image_base64": payload.get("image_base64", ""),
+        "mime_type": payload.get("mime_type", "image/jpeg"),
+        "width": payload["width"],
+        "height": payload["height"],
+    }
+    if include_image:
+        summary["image_base64"] = payload.get("image_base64", "")
+    else:
+        offloaded = toolset_manager.format_output(
+            "take_screenshot",
+            image_body,
+            output_mode_override=OutputMode.RESOURCE,
+            force_offload=True,
+        )
+        summary["uri"] = offloaded.get("uri") or offloaded.get("resource_uri")
+        summary["image_offloaded"] = bool(offloaded.get("offloaded"))
+        if not offloaded.get("offloaded"):
+            summary["image_base64"] = payload.get("image_base64", "")
+    return summary
 
 
 @mcp_server.tool()
@@ -335,6 +413,7 @@ def click(
     button: str = "left",
     click_count: int = 1,
     verify_delta: bool = True,
+    expected_outcome: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Clicks on a UI element either by Set-of-Marks ID, text query, or physical (x, y) coordinates.
@@ -346,11 +425,22 @@ def click(
         button: 'left', 'right', or 'middle'.
         click_count: 1 for single click, 2 for double click, 3 for triple click.
         verify_delta: Whether to automatically check if screen visually reacted post-click.
+        expected_outcome: When set, verify with the local bicameral shield instead of returning pixels.
 
     Returns:
         Verification result detailing success, delta detected, and visual change ratio.
     """
     target_x, target_y = controller.resolve_target_coordinates(query=query, mark_id=mark_id, x=x, y=y)
+
+    if expected_outcome:
+        verdict = controller.bicameral.execute_step(
+            "mouse_click",
+            {"x": target_x, "y": target_y, "button": button, "click_count": click_count},
+            expected_outcome,
+        )
+        controller.note_turn("user", f"click {button} at ({target_x}, {target_y})")
+        controller.note_turn("assistant", verdict.reason)
+        return verdict.model_dump()
 
     def _do_click():
         hal.mouse_click(target_x, target_y, button=button, click_count=click_count)
@@ -599,7 +689,24 @@ def focus_window(window_id: str) -> Dict[str, Any]:
     Brings target window to the foreground and grants it focus.
     """
     ok = hal.focus_window(window_id)
+    _enable_plugin_domain()
     return {"success": ok, "window_id": window_id}
+
+
+def _enable_plugin_domain() -> None:
+    """Enables the focused application's tool domain and notifies the client."""
+    try:
+        win = hal.get_active_window()
+    except Exception:
+        return
+    if win is None:
+        return
+    plugin = controller.plugin_registry.detect(win.title, getattr(win, "app_name", None))
+    if plugin is None:
+        return
+    domain = {"vivado": "eda_vivado", "chrome": "plugins"}.get(plugin.app_id)
+    if domain:
+        toolset_manager.manage_toolsets(action="enable", domains=[domain])
 
 
 @mcp_server.tool()
@@ -980,6 +1087,7 @@ def crystallize_skill(
     extracted_entities: Optional[Dict[str, Any]] = None,
     verification_cmd: Optional[str] = None,
     description: Optional[str] = None,
+    cassette_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Compiles recorded GUI trajectory into a parameterized, deterministic Tcl/CLI skill,
@@ -1009,10 +1117,32 @@ def crystallize_skill(
         description=description,
         verification_cmd=verification_cmd,
     )
+    macro = controller.trace_compiler.compile_steps(
+        steps=steps,
+        name=skill_name,
+        app_id=app_target,
+        description=spec.description,
+        entities=extracted_entities,
+        native_template=spec.tcl_template,
+        native_kind="tcl" if spec.tcl_template.strip() else "none",
+    )
+    replay_hal = None
+    if cassette_path:
+        from vision_mcp.hal.mock_replay import load_cassette
+
+        replay_hal = load_cassette(cassette_path)
+    try:
+        controller.skill_registry.register_macro(macro, hal=replay_hal)
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": f"Macro did not replay on the cassette: {exc}",
+        }
     controller.skill_registry.register_skill(spec)
     return {
         "success": True,
         "skill": spec.model_dump(),
+        "macro": macro.model_dump(),
         "message": f"Successfully crystallized skill '{skill_name}' with {len(spec.parameters)} parameters.",
     }
 
@@ -1051,8 +1181,9 @@ def execute_crystallized_skill(
     plugin = controller.get_active_plugin()
     exec_msg = ""
     success = True
+    macro = controller.skill_registry.get_macro(skill_name)
 
-    if plugin and "vivado" in plugin.app_id:
+    if plugin and "vivado" in plugin.app_id and spec.tcl_template.strip():
         with tempfile.NamedTemporaryFile("w", suffix=".tcl", delete=False) as f:
             f.write(rendered_script + "\n")
             temp_path = f.name
@@ -1070,8 +1201,26 @@ def execute_crystallized_skill(
                 os.unlink(temp_path)
             except Exception:
                 pass
+    elif macro is not None and macro.steps:
+        trajectory = {
+            "trajectory_name": macro.name,
+            "variables": arguments or {},
+            "steps": [
+                {
+                    "step_id": f"s{index}",
+                    "action": step.action,
+                    "parameters": step.args,
+                    "verify_delta": False,
+                }
+                for index, step in enumerate(macro.steps)
+            ],
+        }
+        ran = trajectory_engine.execute_trajectory(trajectory)
+        success = bool(ran.success)
+        exec_msg = ran.message or f"Ran {ran.successful_steps} macro steps"
     else:
-        exec_msg = f"Rendered and executed script ({len(rendered_script.splitlines())} lines)"
+        success = False
+        exec_msg = "Rendered script was not dispatched; no native bridge and no macro steps"
 
     elapsed_ms = (time.monotonic() - t_start) * 1000.0
     return {
@@ -1226,6 +1375,35 @@ def main():
 
         threading.Thread(target=_warmup_gemma, name="gemma-warmup", daemon=True).start()
     mcp_server.run()
+
+
+@mcp_server.resource("mcp://desktop-control/state/{name}")
+def read_state_resource(name: str) -> str:
+    """Reads an offloaded state artifact. Names cannot escape the state directory."""
+    return toolset_manager.resolve_state_file(name).read_text(encoding="utf-8")
+
+
+@mcp_server.tool()
+def compact_history(max_tokens: int = 12000, keep_last_n: int = 2) -> Dict[str, Any]:
+    """Compacts the server-side trajectory log into the 8-part state checkpoint."""
+    compacted = controller.compact_history(max_tokens=max_tokens, keep_last_n=keep_last_n)
+    return {"messages": compacted, "count": len(compacted)}
+
+
+def _capture_tool_schemas() -> None:
+    try:
+        infos = mcp_server._tool_manager.list_tools()
+    except Exception:
+        return
+    for info in infos:
+        tool = toolset_manager._registry.get(getattr(info, "name", ""))
+        if tool is None:
+            continue
+        schema = getattr(info, "parameters", None) or getattr(info, "input_schema", None) or {}
+        tool.input_schema = schema or {}
+
+
+_capture_tool_schemas()
 
 
 if __name__ == "__main__":

@@ -1,18 +1,61 @@
-"""Linux Desktop Hardware Abstraction Layer implementation."""
+"""Linux Desktop Hardware Abstraction Layer implementation.
+
+Native imports (mss, pynput, Xlib) happen on first instantiation, not at
+module import, so collecting this module on macOS or Windows does not
+require those packages.
+"""
 
 import os
 import time
-from typing import Tuple, List, Optional
+from typing import Any, Tuple, List, Optional
 from PIL import Image
-import mss
-from pynput.mouse import Controller as MouseController, Button
-from pynput.keyboard import Controller as KeyboardController, Key
-from Xlib import X, display, error as xlib_error
-from Xlib.protocol import event as protocol_event
 
 from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.types import WindowInfo, BoundingBox
+from vision_mcp.types import WindowInfo, BoundingBox, DisplayMetrics, DisplayTopology
 from vision_mcp.config import CONFIG
+
+_native_loaded = False
+mss: Any = None
+MouseController: Any = None
+Button: Any = None
+KeyboardController: Any = None
+Key: Any = None
+X: Any = None
+display: Any = None
+xlib_error: Any = None
+protocol_event: Any = None
+
+
+def _load_native() -> None:
+    """Imports Linux desktop libraries once."""
+    global _native_loaded, mss, MouseController, Button, KeyboardController, Key
+    global X, display, xlib_error, protocol_event
+    if _native_loaded:
+        return
+    try:
+        import mss as _mss
+        from pynput.mouse import Button as _Button
+        from pynput.mouse import Controller as _MouseController
+        from pynput.keyboard import Controller as _KeyboardController
+        from pynput.keyboard import Key as _Key
+        from Xlib import X as _X
+        from Xlib import display as _display
+        from Xlib import error as _xlib_error
+        from Xlib.protocol import event as _protocol_event
+    except ImportError as exc:
+        raise ImportError(
+            "Linux HAL needs the 'linux' extra: pip install -e '.[linux]'"
+        ) from exc
+    mss = _mss
+    MouseController = _MouseController
+    Button = _Button
+    KeyboardController = _KeyboardController
+    Key = _Key
+    X = _X
+    display = _display
+    xlib_error = _xlib_error
+    protocol_event = _protocol_event
+    _native_loaded = True
 
 
 class LinuxHAL(IDesktopHAL):
@@ -23,6 +66,7 @@ class LinuxHAL(IDesktopHAL):
     """
 
     def __init__(self) -> None:
+        _load_native()
         self.mouse = MouseController()
         self.keyboard = KeyboardController()
         self._sct = mss.MSS()
@@ -39,6 +83,24 @@ class LinuxHAL(IDesktopHAL):
         """Emergency abort if pointer is directed to top-left (0, 0)."""
         if CONFIG.failsafe_corner and x == 0 and y == 0:
             raise RuntimeError("VisionMCP Failsafe Triggered: Cursor moved to (0, 0). Aborting execution.")
+
+    def display_topology(self) -> DisplayTopology:
+        """Logical virtual desktop from mss monitors. Monitor 0 is the union."""
+        displays: List[DisplayMetrics] = []
+        monitors = self._sct.monitors
+        indexed = monitors[1:] if len(monitors) > 1 else monitors
+        for i, mon in enumerate(indexed):
+            displays.append(
+                DisplayMetrics(
+                    display_id=f"mss-{i + 1}",
+                    origin=(int(mon.get("left", 0)), int(mon.get("top", 0))),
+                    size=(int(mon["width"]), int(mon["height"])),
+                    scale=1.0,
+                )
+            )
+        if not displays:
+            displays.append(DisplayMetrics(display_id="primary", origin=(0, 0), size=(0, 0)))
+        return DisplayTopology(displays=displays, primary_id=displays[0].display_id)
 
     def get_screen_size(self) -> Tuple[int, int]:
         """Returns primary monitor dimensions in pixels."""

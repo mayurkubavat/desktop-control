@@ -26,7 +26,7 @@ from PIL import Image
 
 from vision_mcp.config import CONFIG
 from vision_mcp.hal.base import IDesktopHAL
-from vision_mcp.types import BoundingBox, WindowInfo
+from vision_mcp.types import BoundingBox, DisplayMetrics, DisplayTopology, WindowInfo
 
 # US ANSI virtual key codes (Carbon kVK_*)
 KEYCODES: Dict[str, int] = {
@@ -142,6 +142,26 @@ class MacHAL(IDesktopHAL):
         if img.size != target:
             img = img.resize(target, Image.LANCZOS)
         return img
+
+    def display_topology(self) -> DisplayTopology:
+        """Primary display in logical points.
+
+        Scale stays 1.0 here. ``backing_scale()`` touches NSScreen and aborts
+        when this process has no window-server connection, so session boot
+        must not call it.
+        """
+        width, height = self.get_screen_size()
+        return DisplayTopology(
+            displays=[
+                DisplayMetrics(
+                    display_id="main",
+                    origin=(0, 0),
+                    size=(int(width), int(height)),
+                    scale=1.0,
+                )
+            ],
+            primary_id="main",
+        )
 
     def backing_scale(self) -> float:
         try:
@@ -323,3 +343,7 @@ class MacHAL(IDesktopHAL):
             return ok
         except Exception:
             return False
+
+
+def build_hal() -> MacHAL:
+    return MacHAL()

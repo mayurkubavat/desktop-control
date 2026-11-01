@@ -271,7 +271,8 @@ def test_factory_picks_mac_hal(monkeypatch):
     monkeypatch.setattr(factory.sys, "platform", "darwin")
     monkeypatch.setattr(macos, "_load_quartz", lambda: FakeQuartz())
     hal = factory.get_desktop_hal()
-    assert isinstance(hal, MacHAL)
+    backend = getattr(hal, "backend", hal)
+    assert isinstance(backend, MacHAL)
     monkeypatch.setattr(factory, "_HAL_INSTANCE", None)
 
 

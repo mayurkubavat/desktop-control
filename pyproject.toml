@@ -10,16 +10,23 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=2.3.0",
-    "mss>=10.2.0",
     "pillow>=10.0.0",
-    "pynput>=1.8.2",
-    "python-xlib>=0.33",
     "pydantic>=2.10.0",
     "opencv-python-headless>=4.8.0",
     "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
+# Linux X11 backend. Not imported unless the process is on Linux.
+linux = [
+    "mss>=10.2.0; sys_platform == 'linux'",
+    "pynput>=1.8.2; sys_platform == 'linux'",
+    "python-xlib>=0.33; sys_platform == 'linux'",
+]
+# Windows input. UIA window enumeration is still a fail-closed stub.
+windows = [
+    "pynput>=1.8.2; sys_platform == 'win32'",
+]
 # Local OCR lane. Linux/Windows: PP-OCRv4 ONNX models bundled in the wheel (~16 MB).
 ocr = [
     "rapidocr_onnxruntime>=1.3; sys_platform != 'darwin'",

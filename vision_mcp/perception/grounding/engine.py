@@ -8,7 +8,8 @@ from vision_mcp.perception.grounding.semantic import SemanticGroundingProvider
 from vision_mcp.perception.grounding.cv import CVGroundingProvider
 from vision_mcp.perception.grounding.template import TemplateGroundingProvider
 from vision_mcp.perception.grounding.ensemble import EnsembleGroundingProvider
-from vision_mcp.types import UIElement
+from vision_mcp.perception.grounding.magnitude import ground_magnitude_icon
+from vision_mcp.types import UIElement, RelationalAnchor
 from vision_mcp.config import CONFIG
 
 
@@ -104,3 +105,25 @@ class GroundingEngine:
             scale_factor=scale_factor,
             fuzzy=fuzzy,
         )
+
+    def ground_icon(
+        self,
+        image: Image.Image,
+        template: Image.Image,
+        anchor: Optional[RelationalAnchor] = None,
+        ocr_lines: Optional[list] = None,
+        scale_factor: float = 1.0,
+        cache: Optional[object] = None,
+        app_key: str = "desktop",
+    ) -> Optional[UIElement]:
+        """Magnitude match, optionally inside an OCR offset window, with cache write-back."""
+        element = ground_magnitude_icon(
+            image=image,
+            template=template,
+            anchor=anchor,
+            ocr_lines=ocr_lines,
+            scale_factor=scale_factor,
+        )
+        if element is not None and anchor is not None and cache is not None and hasattr(cache, "remember_anchor"):
+            cache.remember_anchor(app_key, anchor.label, anchor)
+        return element

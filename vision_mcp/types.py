@@ -17,6 +17,7 @@ class ExecutionPhase(str, Enum):
     CONTRACT_VERIFIED = "CONTRACT_VERIFIED"
     OBSTRUCTED_BY_MODAL = "OBSTRUCTED_BY_MODAL"
     CONTRACT_FAILED = "CONTRACT_FAILED"
+    SLEEP_FALLBACK = "SLEEP_FALLBACK"
 
 
 class StateAssertionType(str, Enum):
@@ -485,5 +486,85 @@ class TrajectoryExecutionResult(BaseModel):
     step_results: List[StepExecutionResult] = Field(default_factory=list, description="Per-step execution outcomes")
     final_screenshot_b64: Optional[str] = Field(default=None, description="Optional final screen capture")
     message: str = Field(default="", description="Overall trajectory status message")
+
+
+class DisplayMetrics(BaseModel):
+    """One monitor in logical virtual-desktop space."""
+
+    display_id: str
+    origin: tuple[int, int]
+    size: tuple[int, int]
+    scale: float = 1.0
+    rotation_deg: int = 0
+
+
+class DisplayTopology(BaseModel):
+    """Virtual desktop: logical points, origins may be negative."""
+
+    displays: List[DisplayMetrics] = Field(default_factory=list)
+    primary_id: str = "primary"
+
+
+def logical_to_backing(point: tuple[int, int], display: DisplayMetrics) -> tuple[int, int]:
+    """Converts a logical global point into that display's backing pixels."""
+    lx = point[0] - display.origin[0]
+    ly = point[1] - display.origin[1]
+    return (round(lx * display.scale), round(ly * display.scale))
+
+
+class QuiescenceReport(BaseModel):
+    """Result of an event-driven settle wait."""
+
+    phase: ExecutionPhase
+    elapsed_ms: float = 0.0
+    dirty_area: int = 0
+    cursor: str = "unknown"
+    ax_changed: bool = False
+
+
+class RelationalAnchor(BaseModel):
+    """Icon located by an OCR label plus a pixel offset."""
+
+    label: str
+    dx: int = -24
+    dy: int = 0
+    box: tuple[int, int] = (24, 24)
+    magnitude_sha: str = ""
+
+
+class StateCheckpoint(BaseModel):
+    """Eight-part invariant compaction of a desktop trajectory."""
+
+    user_instructions: str
+    task_template: List[str] = Field(default_factory=list)
+    constraints: List[str] = Field(default_factory=list)
+    actions_taken: List[str] = Field(default_factory=list)
+    errors_and_fixes: List[str] = Field(default_factory=list)
+    progress_metrics: str = ""
+    current_screen_state: str = ""
+    next_immediate_step: str = ""
+    compressor: str = "heuristic"
+    covers_turns: tuple[int, int] = (0, 0)
+
+
+class TraceStep(BaseModel):
+    """One recorded action with the selector the cascade actually used."""
+
+    action: str
+    selector: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = Field(default_factory=dict)
+    post: Optional[PostConditionContract] = None
+
+
+class CrystallizedMacro(BaseModel):
+    """Parameterizable macro. Steps run locally; native_template is optional."""
+
+    name: str
+    app_id: str = ""
+    description: str = ""
+    params: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    steps: List[TraceStep] = Field(default_factory=list)
+    native_template: str = ""
+    native_kind: str = "none"
 
 

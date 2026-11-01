@@ -364,5 +364,5 @@ def test_hal_factory_desktop_hal_replay_override(monkeypatch):
     factory._HAL_INSTANCE = None  # Reset singleton
 
     hal = factory.get_desktop_hal()
-    assert isinstance(hal, MockReplayHAL)
+    assert isinstance(getattr(hal, "backend", hal), MockReplayHAL)
     factory._HAL_INSTANCE = None  # Clean up

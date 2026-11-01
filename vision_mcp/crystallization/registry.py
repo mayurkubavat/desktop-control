@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, List, Optional
 import jinja2
 
-from vision_mcp.types import CrystallizedSkillSpec
+from vision_mcp.types import CrystallizedMacro, CrystallizedSkillSpec
 from vision_mcp.config import CONFIG
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class DynamicSkillRegistry:
         raw_path = storage_path or CONFIG.crystallized_skills_path
         self.storage_path = os.path.expanduser(raw_path)
         self.skills: Dict[str, CrystallizedSkillSpec] = {}
+        self.macros: Dict[str, CrystallizedMacro] = {}
         self._jinja = jinja2.Environment(autoescape=False)
         self.load_from_disk()
 
@@ -34,6 +35,19 @@ class DynamicSkillRegistry:
         self.save_to_disk()
         logger.info(f"Registered crystallized skill '{spec.skill_name}' with {len(spec.parameters)} parameters")
         return True
+
+    def register_macro(self, macro: CrystallizedMacro, hal: Optional[Any] = None) -> bool:
+        """Registers a macro. When a cassette HAL is passed, replay must succeed first."""
+        if hal is not None:
+            from vision_mcp.crystallization.trace_compiler import replay_macro
+
+            replay_macro(macro, hal)
+        self.macros[macro.name] = macro
+        self.save_to_disk()
+        return True
+
+    def get_macro(self, name: str) -> Optional[CrystallizedMacro]:
+        return self.macros.get(name)
 
     def get_skill(self, name: str) -> Optional[CrystallizedSkillSpec]:
         """Retrieves skill specification by name."""
@@ -74,6 +88,8 @@ class DynamicSkillRegistry:
                 name: spec.model_dump()
                 for name, spec in self.skills.items()
             }
+            if self.macros:
+                payload["_macros"] = {name: macro.model_dump() for name, macro in self.macros.items()}
             with open(self.storage_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
             return True
@@ -90,6 +106,10 @@ class DynamicSkillRegistry:
             with open(self.storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for name, spec_dict in data.items():
+                if name == "_macros":
+                    for macro_name, macro_dict in spec_dict.items():
+                        self.macros[macro_name] = CrystallizedMacro(**macro_dict)
+                    continue
                 self.skills[name] = CrystallizedSkillSpec(**spec_dict)
             logger.info(f"Loaded {len(self.skills)} crystallized skills from '{self.storage_path}'")
             return True

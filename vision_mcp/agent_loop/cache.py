@@ -179,7 +179,12 @@ class ActionCache:
             os.makedirs(os.path.dirname(os.path.abspath(self.cache_file)), exist_ok=True)
 
         self._cache: Dict[str, CachedLocator] = {}
+        self.relational_anchors: Dict[str, Any] = {}
         self._load()
+
+    def remember_anchor(self, app_key: str, query: str, anchor: Any) -> None:
+        """Writes a relational OCR anchor after a Tier 2 or Tier 3 hit."""
+        self.relational_anchors[self._make_key(app_key, query)] = anchor
 
     def _make_key(self, app_key: str, query: str) -> str:
         """Generates normalized lookup key."""

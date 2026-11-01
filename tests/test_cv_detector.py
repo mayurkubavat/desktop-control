@@ -67,7 +67,12 @@ def test_cv_detector_scaling_inversion():
 
 def test_server_take_screenshot_annotated_cv():
     """Verify take_screenshot with mode='annotated_cv' works on live desktop."""
-    res = server.take_screenshot(mode="annotated_cv")
+    from subprocess import CalledProcessError
+
+    try:
+        res = server.take_screenshot(mode="annotated_cv", include_image=True)
+    except CalledProcessError:
+        pytest.skip("screen capture is unavailable in this environment")
     assert "marks" in res
     assert isinstance(res["marks"], list)
     assert "image_base64" in res

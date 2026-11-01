@@ -291,7 +291,7 @@ class VisionConfig(BaseModel):
         description="Estimated token threshold above which outputs are offloaded out-of-band to disk/tmpfs.",
     )
     toolset_profile: str = Field(
-        default="full_developer",
+        default="minimal_computer_use",
         description="Default active toolset profile: 'minimal_computer_use', 'window_mgmt', 'full_developer', 'eda_automation'.",
     )
     state_dir: Optional[str] = Field(

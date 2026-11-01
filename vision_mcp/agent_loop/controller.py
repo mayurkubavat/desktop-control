@@ -16,9 +16,11 @@ from vision_mcp.perception.token_optimizer import TokenOptimizer
 from vision_mcp.perception.window_clipper import WindowClipper
 from vision_mcp.agent_loop.cache import ActionCache
 from vision_mcp.agent_loop.obstruction import ObstructionInterceptor
+from vision_mcp.agent_loop.bicameral import BicameralStepController
 from vision_mcp.crystallization import (
     JournalCorrelator,
     TclTrajectoryCompiler,
+    TraceCompiler,
     DynamicSkillRegistry,
 )
 from vision_mcp.vdom import (
@@ -86,20 +88,53 @@ class FeedbackLoopController:
             modal_classifier=modal_classifier,
             min_confidence=CONFIG.gemma3_modal_min_confidence,
         )
-        self.quiescence_monitor = (
-            X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
-            if CONFIG.enable_quiescence_monitor and sys.platform != "darwin"
-            else None
-        )
+        self.quiescence_monitor = getattr(hal, "quiescence", None)
+        if self.quiescence_monitor is None and CONFIG.enable_quiescence_monitor and sys.platform != "darwin":
+            self.quiescence_monitor = X11QuiescenceMonitor(min_damage_area=CONFIG.min_damage_area)
         self.journal_correlator = JournalCorrelator()
         self.skill_registry = DynamicSkillRegistry()
         self.trajectory_compiler = TclTrajectoryCompiler()
+        self.trace_compiler = TraceCompiler()
         self.vdom_fusion = VDOMFusionEngine()
         self.layout_solver = SubPaneLayoutSolver()
+        self.bicameral = BicameralStepController(
+            hal,
+            local_gemma_client=gemma,
+        )
+        self._trajectory_log: List[Dict[str, Any]] = []
+        self._act_batches = 0
         self.last_vdom_snapshot: Optional[VirtualDOMSnapshot] = None
         self.active_marks: Dict[int, UIElement] = {}
         self.last_screenshot_meta: Optional[Tuple[int, int, float]] = None
         self.last_clean_frame: Optional[Image.Image] = None
+
+    def note_turn(self, role: str, content: str) -> None:
+        """Appends one turn and compacts every six act-verify batches."""
+        self._trajectory_log.append({"role": role, "content": content})
+        self._act_batches += 1
+        if self._act_batches >= 6:
+            self._trajectory_log = BicameralStepController.compact_trajectory_history(
+                self._trajectory_log,
+                force=True,
+            )
+            self._act_batches = 0
+
+    def compact_history(self, max_tokens: int = 12000, keep_last_n: int = 2) -> List[Dict[str, Any]]:
+        """Compacts the in-server trajectory log with the 8-part checkpoint."""
+        compressor = None
+        grounder = getattr(self.neural_grounder, "gemma3_grounder", None)
+        if grounder is not None and hasattr(grounder, "compress_history"):
+            def compressor(prompt: str) -> str:
+                return grounder.compress_history(prompt)
+        self._trajectory_log = BicameralStepController.compact_trajectory_history(
+            self._trajectory_log,
+            max_tokens=max_tokens,
+            keep_last_n=keep_last_n,
+            local_compressor_fn=compressor,
+            force=True,
+        )
+        self._act_batches = 0
+        return self._trajectory_log
 
     def _get_active_app_key(self) -> str:
         """Derives a normalized application key from the currently focused window."""
@@ -558,6 +593,7 @@ class FeedbackLoopController:
             sleep_duration = settle_time_sec if settle_time_sec is not None else (CONFIG.quiescence_window_ms / 1000.0)
             time.sleep(sleep_duration)
             quiescence_elapsed_ms = (time.monotonic() - t_action_start) * 1000.0
+            phase = ExecutionPhase.SLEEP_FALLBACK
 
         # Evaluate Post-Condition Contract
         contract_passed: Optional[bool] = None
@@ -598,8 +634,9 @@ class FeedbackLoopController:
             f"Action verified [{phase.value} in {quiescence_elapsed_ms:.1f}ms, dirty_area={dirty_area}px]{details_msg}"
         )
 
+        no_reaction = phase == ExecutionPhase.SETTLING and dirty_area == 0 and verify_delta
         return ActionVerificationResult(
-            success=phase != ExecutionPhase.CONTRACT_FAILED,
+            success=phase != ExecutionPhase.CONTRACT_FAILED and not no_reaction,
             action_type=action_name,
             delta_detected=delta_detected,
             change_ratio=change_ratio,

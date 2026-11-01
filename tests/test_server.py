@@ -1,5 +1,7 @@
 """Integration tests for FastMCP server tools."""
 
+import pytest
+from subprocess import CalledProcessError
 import vision_mcp.server as server
 
 
@@ -37,7 +39,10 @@ def test_run_terminal_command():
 
 def test_take_screenshot_tool():
     """Verify take_screenshot tool executes and returns valid payload."""
-    res = server.take_screenshot(mode="raw")
+    try:
+        res = server.take_screenshot(mode="raw", include_image=True)
+    except CalledProcessError:
+        pytest.skip("screen capture is unavailable in this environment")
     assert "image_base64" in res
     assert res["mime_type"] == "image/jpeg"
     assert res["width"] > 0

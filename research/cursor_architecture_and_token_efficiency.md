@@ -449,3 +449,4 @@ Before any synthesized macro or skill is registered in the live tool catalog, it
 | **P4** | **Default Out-of-Band State** | Four tools call `format_output`; default is `inline`. Screenshots inline base64. | Default `take_screenshot` to Set-of-Marks text list + URI; register `mcp://desktop-control/state/{file}` resource reader. |
 | **P5** | **Bicameral Execution Wiring** | `bicameral.py` defines tier order; `controller.py` does not invoke it. | Connect `FeedbackLoopController` to `BicameralStepController` using the 7 escalation predicates. |
 | **P6** | **Gradient Magnitude Templates** | `cv.py` uses standard Canny and RGB template matching. | Implement `magnitude_map()` and relational OCR anchors in `GroundingEngine`. |
+

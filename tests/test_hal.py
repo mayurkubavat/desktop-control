@@ -1,9 +1,16 @@
 """Tests for Hardware Abstraction Layer implementations."""
 
+import os
+import sys
 import pytest
 from vision_mcp.hal.linux import LinuxHAL
 from vision_mcp.hal.factory import get_desktop_hal
 from vision_mcp.hal.base import IDesktopHAL
+
+_needs_x11 = pytest.mark.skipif(
+    sys.platform == "darwin" or sys.platform == "win32" or not os.environ.get("DISPLAY"),
+    reason="Linux HAL screen-size check needs an X11 DISPLAY",
+)
 
 
 def test_hal_factory():
@@ -37,6 +44,7 @@ def test_mock_hal_windows(mock_hal):
     assert mock_hal.focus_window("0x9999") is False
 
 
+@_needs_x11
 def test_linux_hal_screen_size():
     """Verify live Linux HAL reports non-zero screen size."""
     hal = LinuxHAL()
@@ -45,6 +53,7 @@ def test_linux_hal_screen_size():
     assert h > 0
 
 
+@_needs_x11
 def test_linux_hal_failsafe_corner():
     """Verify failsafe corner (0, 0) triggers emergency abort."""
     hal = LinuxHAL()

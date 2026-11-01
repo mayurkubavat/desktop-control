@@ -38,7 +38,10 @@ def _platform_kind() -> str:
         return "windows"
     if sys.platform == "darwin":
         return "darwin"
-    if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+    if not os.environ.get("DISPLAY"):
+        # Native Wayland without XWayland, or no display at all (SSH, CI):
+        # the fail-closed driver explains what is missing instead of crashing
+        # in pynput/Xlib at import time.
         return "wayland"
     return "linux"
 

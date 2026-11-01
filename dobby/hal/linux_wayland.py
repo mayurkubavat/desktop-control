@@ -1,11 +1,13 @@
 """Native Wayland backend.
 
-Selected only when WAYLAND_DISPLAY is set and DISPLAY is not (no XWayland).
+Selected on Linux whenever DISPLAY is not set: native Wayland without
+XWayland, or no display at all (SSH, CI).
 Operations fail closed. XWayland sessions keep using the X11 driver.
 """
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional, Tuple
 
 from PIL import Image
@@ -16,13 +18,16 @@ from dobby.types import WindowInfo
 
 
 _MSG = (
-    "Native Wayland capture and input are not available. "
-    "Start an XWayland DISPLAY or set DESKTOP_HAL=linux."
+    "No X11 display: native Wayland capture and input are not supported yet, "
+    "and DISPLAY is not set. Run inside an X11 or XWayland session (or Xvfb) "
+    "with DISPLAY set, or set DESKTOP_HAL=linux."
 )
 
 
 class WaylandHAL(IDesktopHAL):
     """Fail-closed Wayland driver. It does not silently click through X11."""
+
+    display_server = "Wayland" if os.environ.get("WAYLAND_DISPLAY") else "none"
 
     def _unavailable(self) -> None:
         raise CapabilityUnavailable(_MSG)

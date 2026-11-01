@@ -52,12 +52,13 @@ def spawn(hal):
     """Starts a zenity dialog with a unique title; returns its WindowInfo."""
     procs = []
 
-    def _spawn(kind: str = "--info", extra=()):
+    def _spawn(kind: str = "--info", extra=(), capture: bool = False):
         _need("zenity")
         title = f"dobby-{uuid.uuid4().hex[:8]}"
         p = subprocess.Popen(
             ["zenity", kind, f"--title={title}", "--text=Dobby test", *extra],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, text=True,
         )
         procs.append(p)
         win = _wait_for(lambda: next((w for w in hal.list_windows() if w.title == title), None))
@@ -183,3 +184,90 @@ def test_atspi_without_bus_does_not_abort():
     assert out.returncode == 0, out.stderr
     assert "available False" in out.stdout
     assert "0 None" in out.stdout
+
+
+# ---------------------------------------------------------------- input
+
+def _center(b):
+    return b.x + b.width // 2, b.y + b.height // 2
+
+
+def _entry_dialog(hal, inspector, spawn):
+    win, proc = spawn("--entry", capture=True)
+    hal.focus_window(win.window_id)
+    entry = _wait_for(lambda: next((e for e in inspector.inspect_desktop() if e.role == "text"), None))
+    assert entry is not None
+    return win, proc, entry
+
+
+def test_type_click_and_submit(hal, inspector, spawn):
+    _win, proc, entry = _entry_dialog(hal, inspector, spawn)
+    hal.mouse_click(*_center(entry.bbox))
+    hal.keyboard_type("hello dobby")
+    ok = next(e for e in inspector.inspect_desktop() if e.name == "OK")
+    hal.mouse_click(*_center(ok.bbox))
+    out, _ = proc.communicate(timeout=5)
+    assert out.strip() == "hello dobby"
+
+
+def test_hotkey_select_all_replaces_and_enter_submits(hal, inspector, spawn):
+    _win, proc, entry = _entry_dialog(hal, inspector, spawn)
+    hal.mouse_click(*_center(entry.bbox))
+    hal.keyboard_type("first")
+    hal.keyboard_hotkey(["ctrl", "a"])
+    hal.keyboard_type("second")
+    hal.keyboard_press_key("enter")
+    out, _ = proc.communicate(timeout=5)
+    assert out.strip() == "second"
+
+
+def test_unicode_typing(hal, inspector, spawn):
+    _win, proc, entry = _entry_dialog(hal, inspector, spawn)
+    hal.mouse_click(*_center(entry.bbox))
+    hal.keyboard_type("café ü")
+    hal.keyboard_press_key("Return")
+    out, _ = proc.communicate(timeout=5)
+    assert out.strip() == "café ü"
+
+
+def test_escape_cancels(hal, inspector, spawn):
+    _win, proc, entry = _entry_dialog(hal, inspector, spawn)
+    hal.mouse_click(*_center(entry.bbox))
+    hal.keyboard_press_key("esc")
+    proc.communicate(timeout=5)
+    assert proc.returncode == 1  # zenity: cancelled
+
+
+def test_cursor_position_follows_move(hal):
+    hal.mouse_move(321, 234)
+    assert hal.get_cursor_position() == (321, 234)
+
+
+def test_capture_matches_screen_size(hal):
+    w, h = hal.get_screen_size()
+    img = hal.capture_screen()
+    assert img.size == (w, h)
+    crop = hal.capture_screen(region=(10, 20, 100, 50))
+    assert crop.size == (100, 50)
+
+
+def test_topology_and_ui_scale(hal):
+    topo = hal.display_topology()
+    assert topo.displays and topo.displays[0].scale == 1.0
+    assert hal.ui_scale > 0
+
+
+def test_factory_without_display_fails_closed():
+    code = (
+        "from dobby.hal.factory import get_desktop_hal\n"
+        "from dobby.hal.errors import CapabilityUnavailable\n"
+        "h = get_desktop_hal()\n"
+        "try:\n"
+        "    h.capture_screen()\n"
+        "except CapabilityUnavailable as e:\n"
+        "    print('closed', 'DISPLAY' in str(e))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "DESKTOP_HAL")}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert "closed True" in out.stdout

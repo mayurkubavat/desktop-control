@@ -109,6 +109,25 @@ class LinuxHAL(IDesktopHAL):
             displays.append(DisplayMetrics(display_id="primary", origin=(0, 0), size=(0, 0)))
         return DisplayTopology(displays=displays, primary_id=displays[0].display_id)
 
+    @property
+    def ui_scale(self) -> float:
+        """Desktop UI scale from the Xft.dpi resource (96 dpi = 1.0).
+
+        Diagnostics only: on X11, input, capture and window geometry all use
+        the same physical pixels, so display scale stays 1.0 in the topology.
+        """
+        try:
+            res = self._x_display.screen().root.get_full_property(
+                self._x_display.intern_atom("RESOURCE_MANAGER"), X.AnyPropertyType
+            ) if self._x_display else None
+            text = res.value.decode("utf-8", "ignore") if res is not None else ""
+            for line in text.splitlines():
+                if line.startswith("Xft.dpi:"):
+                    return round(float(line.split(":", 1)[1].strip()) / 96.0, 2)
+        except Exception:
+            pass
+        return 1.0
+
     def get_screen_size(self) -> Tuple[int, int]:
         """Returns primary monitor dimensions in pixels."""
         if len(self._sct.monitors) > 1:
@@ -171,77 +190,155 @@ class LinuxHAL(IDesktopHAL):
         self.mouse.scroll(dx, dy)
         time.sleep(CONFIG.action_cooldown_ms / 1000.0)
 
+    # ----------------------------------------------------------- keyboard
+    #
+    # Keys go straight to XTest with python-xlib rather than through pynput:
+    # pynput's character typing is ignored by GTK 4 apps (Enter works, letters
+    # do not), while raw XTest events reach every toolkit. Characters with no
+    # key in the current layout are typed by briefly binding them to a spare
+    # keycode, the same trick xdotool uses.
+
+    _KEYSYM_NAMES = {
+        "enter": "Return", "return": "Return", "tab": "Tab", "space": "space",
+        "backspace": "BackSpace", "delete": "Delete", "del": "Delete",
+        "escape": "Escape", "esc": "Escape",
+        "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+        "home": "Home", "end": "End",
+        "pageup": "Prior", "page_up": "Prior", "pgup": "Prior",
+        "pagedown": "Next", "page_down": "Next", "pgdn": "Next",
+        "insert": "Insert", "ins": "Insert",
+        "ctrl": "Control_L", "control": "Control_L", "lctrl": "Control_L", "rctrl": "Control_R",
+        "alt": "Alt_L", "option": "Alt_L", "opt": "Alt_L", "altgr": "ISO_Level3_Shift",
+        "shift": "Shift_L", "lshift": "Shift_L", "rshift": "Shift_R",
+        "super": "Super_L", "meta": "Super_L", "cmd": "Super_L", "command": "Super_L",
+        "win": "Super_L", "windows": "Super_L",
+        "capslock": "Caps_Lock", "caps_lock": "Caps_Lock", "numlock": "Num_Lock",
+        "scrolllock": "Scroll_Lock", "menu": "Menu", "apps": "Menu", "pause": "Pause",
+        "printscreen": "Print", "print_screen": "Print", "print": "Print",
+        "volumeup": "XF86AudioRaiseVolume", "volumedown": "XF86AudioLowerVolume",
+        "volumemute": "XF86AudioMute", "mute": "XF86AudioMute",
+        "playpause": "XF86AudioPlay", "nexttrack": "XF86AudioNext", "prevtrack": "XF86AudioPrev",
+        **{f"f{i}": f"F{i}" for i in range(1, 25)},
+    }
+
+    def _keysym_for(self, key: str) -> int:
+        """X keysym for a key name ("enter", "ctrl", "F5") or a single character."""
+        from Xlib import XK
+
+        if len(key) == 1:
+            code = ord(key)
+            if key == "\n":
+                return XK.string_to_keysym("Return")
+            if key == "\t":
+                return XK.string_to_keysym("Tab")
+            # Latin-1 keysyms equal their code point; everything else uses the Unicode range.
+            return code if 0x20 <= code <= 0x7E or 0xA0 <= code <= 0xFF else 0x01000000 + code
+        name = key.strip()
+        low = name.lower().replace(" ", "").replace("-", "")
+        mapped = self._KEYSYM_NAMES.get(low) or self._KEYSYM_NAMES.get(name.lower())
+        sym = XK.string_to_keysym(mapped or name)
+        if not sym:
+            raise ValueError(f"Unknown key name: {key!r}")
+        return sym
+
+    def _keycode_for(self, keysym: int) -> Tuple[Optional[int], bool]:
+        """(keycode, needs_shift) for keysym in the current layout, or (None, False)."""
+        best = None
+        for keycode, index in self._x_display.keysym_to_keycodes(keysym):
+            if index in (0, 1) and (best is None or index < best[1]):
+                best = (keycode, index)
+        if best is None:
+            return None, False
+        return best[0], best[1] == 1
+
+    def _spare_keycode(self) -> Optional[int]:
+        cached = self.__dict__.get("_spare")
+        if cached:
+            return cached
+        d = self._x_display
+        first = d.display.info.min_keycode
+        count = d.display.info.max_keycode - first + 1
+        mapping = d.get_keyboard_mapping(first, count)
+        for i in range(count - 1, -1, -1):  # high keycodes are the usual empty ones
+            if not any(mapping[i]):
+                self._spare = first + i
+                return self._spare
+        return None
+
+    def _fake(self, keycode: int, down: bool) -> None:
+        from Xlib.ext import xtest
+
+        xtest.fake_input(self._x_display, X.KeyPress if down else X.KeyRelease, keycode)
+        self._x_display.sync()
+
+    def _tap_keysym(self, keysym: int, hold: float = 0.01) -> None:
+        keycode, shift = self._keycode_for(keysym)
+        if keycode is not None:
+            shift_code = self._keycode_for(self._keysym_for("shift"))[0] if shift else None
+            if shift_code:
+                self._fake(shift_code, True)
+            self._fake(keycode, True)
+            time.sleep(hold)
+            self._fake(keycode, False)
+            if shift_code:
+                self._fake(shift_code, False)
+            return
+        spare = self._spare_keycode()
+        if spare is None:
+            raise RuntimeError(f"No key for keysym 0x{keysym:x} and no spare keycode to bind it to")
+        d = self._x_display
+        d.change_keyboard_mapping(spare, [(keysym, keysym)])
+        d.sync()
+        time.sleep(0.03)  # let clients process MappingNotify
+        self._fake(spare, True)
+        time.sleep(hold)
+        self._fake(spare, False)
+        time.sleep(0.03)
+        d.change_keyboard_mapping(spare, [(0, 0)])
+        d.sync()
+
     def keyboard_type(self, text: str, delay_ms: float = 12.0) -> None:
-        """Types string with natural timing."""
+        """Types text, including characters that have no key in the current layout."""
         delay_sec = max(delay_ms / 1000.0, 0.001)
-        for char in text:
-            self.keyboard.type(char)
-            time.sleep(delay_sec)
+        if not self._x_display:
+            for char in text:
+                self.keyboard.type(char)
+                time.sleep(delay_sec)
+        else:
+            for char in text:
+                self._tap_keysym(self._keysym_for(char))
+                time.sleep(delay_sec)
         time.sleep(CONFIG.action_cooldown_ms / 1000.0)
 
-    def _resolve_key(self, key_str: str) -> Any:
-        """Resolves string key names into pynput Key or character."""
-        key_map = {
-            "enter": Key.enter,
-            "return": Key.enter,
-            "tab": Key.tab,
-            "space": Key.space,
-            "backspace": Key.backspace,
-            "delete": Key.delete,
-            "escape": Key.esc,
-            "esc": Key.esc,
-            "up": Key.up,
-            "down": Key.down,
-            "left": Key.left,
-            "right": Key.right,
-            "home": Key.home,
-            "end": Key.end,
-            "pageup": Key.page_up,
-            "page_up": Key.page_up,
-            "pagedown": Key.page_down,
-            "page_down": Key.page_down,
-            "ctrl": Key.ctrl,
-            "control": Key.ctrl,
-            "alt": Key.alt,
-            "shift": Key.shift,
-            "super": Key.cmd,
-            "meta": Key.cmd,
-            "cmd": Key.cmd,
-            "win": Key.cmd,
-            "f1": Key.f1,
-            "f2": Key.f2,
-            "f3": Key.f3,
-            "f4": Key.f4,
-            "f5": Key.f5,
-            "f6": Key.f6,
-            "f7": Key.f7,
-            "f8": Key.f8,
-            "f9": Key.f9,
-            "f10": Key.f10,
-            "f11": Key.f11,
-            "f12": Key.f12,
-        }
-        low = key_str.lower().strip()
-        return key_map.get(low, key_str)
-
     def keyboard_press_key(self, key_name: str) -> None:
-        """Presses and releases a single key."""
-        k = self._resolve_key(key_name)
-        self.keyboard.press(k)
-        time.sleep(0.02)
-        self.keyboard.release(k)
+        """Presses and releases a single key ("enter", "f5", "a")."""
+        if not self._x_display:
+            raise RuntimeError("No X display for keyboard input")
+        self._tap_keysym(self._keysym_for(key_name), hold=0.02)
         time.sleep(CONFIG.action_cooldown_ms / 1000.0)
 
     def keyboard_hotkey(self, keys: List[str]) -> None:
-        """Sends multi-key chord shortcut."""
-        resolved = [self._resolve_key(k) for k in keys]
-        for k in resolved:
-            self.keyboard.press(k)
-            time.sleep(0.01)
-        time.sleep(0.05)
-        for k in reversed(resolved):
-            self.keyboard.release(k)
-            time.sleep(0.01)
+        """Presses a chord (["ctrl", "shift", "t"]) and releases it in reverse order."""
+        if not self._x_display:
+            raise RuntimeError("No X display for keyboard input")
+        codes = []
+        for k in keys:
+            keysym = self._keysym_for(k.lower() if len(k) == 1 else k)
+            keycode, _shift = self._keycode_for(keysym)
+            if keycode is None:
+                raise ValueError(f"Key {k!r} has no keycode in the current layout")
+            codes.append(keycode)
+        pressed = []
+        try:
+            for c in codes:
+                self._fake(c, True)
+                pressed.append(c)
+                time.sleep(0.01)
+            time.sleep(0.05)
+        finally:
+            for c in reversed(pressed):
+                self._fake(c, False)
+                time.sleep(0.01)
         time.sleep(CONFIG.action_cooldown_ms / 1000.0)
 
     # ------------------------------------------------------------ windows

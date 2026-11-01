@@ -479,6 +479,9 @@ def test_client_confirm(fake_client):
     client, log = fake_client
     assert client.confirm("yes?", secs=2) is True
     assert client.confirm("no?", secs=2) is False
+    deadline = time.time() + 2  # confirm.cancel is fire-and-forget
+    while "confirm.cancel" not in _ops(log) and time.time() < deadline:
+        time.sleep(0.02)
     ops = _ops(log)
     assert ops.count("confirm") == 2 and "confirm.cancel" in ops
 
@@ -626,3 +629,23 @@ def test_render_gif_and_frames(tmp_path):
     assert gif.exists() and Image.open(gif).n_frames >= 2
     pngs = an.render(found, an.load_track(track), tmp_path / "pngs")
     assert len(pngs) == 3
+
+
+def test_annotate_chip_grows_with_detail_and_uses_risk_colour():
+    from PIL import Image
+    from dobby.overlay.annotate import TrackState, annotate
+
+    bg = Image.new("RGB", (400, 80), (255, 255, 255))
+
+    def right_edge(img):
+        px = img.load()
+        y = 22 + 11  # chip vertical centre for cursor at y=0, scale 1
+        xs = [x for x in range(img.width) if px[x, y] != (255, 255, 255)]
+        return max(xs)
+
+    plain = annotate(bg, TrackState(cursor=(10, 0)))
+    detailed = annotate(bg, TrackState(cursor=(10, 0), intent="Click “Run Synthesis”"))
+    assert right_edge(detailed) > right_edge(plain) + 60
+    red = annotate(bg, TrackState(cursor=(10, 0), risk="danger"))
+    r, g, b = red.getpixel((30, 22 + 18))
+    assert r > 200 and g < 150

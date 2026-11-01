@@ -168,15 +168,62 @@ def annotate(img: Image.Image, s: TrackState, scale: float = 1.0, origin: Point 
         k = 1.25 * scale
         poly = [(tx + x * k, ty + y * k) for x, y in _ARROW]
         d.polygon(poly, fill=color + (255,), outline=(255, 255, 255, 255))
-        badge = {"thinking": " •••", "typing": " ⌨", "waiting_user": " ✋"}.get(s.state, "")
-        text = s.intent or (label + badge)
-        font = _font(int(11 * scale))
-        left = tx + 14 * scale
-        top = ty + 22 * scale
-        bbox = d.textbbox((left + 7 * scale, top + 2 * scale), text, font=font)
-        d.rounded_rectangle([left, top, bbox[2] + 7 * scale, top + 17 * scale], radius=5 * scale, fill=color + (255,))
-        d.text((left + 7 * scale, top + 2 * scale), text, font=font, fill=(255, 255, 255, 255))
+        _draw_chip(d, tx + 12 * scale, ty + 22 * scale, label, s.intent, s.state, color, scale)
     return Image.alpha_composite(out, layer).convert("RGB")
+
+
+def _lighter(rgb: Tuple[int, int, int], f: float = 0.35) -> Tuple[int, int, int]:
+    return tuple(int(c + (255 - c) * f) for c in rgb)  # type: ignore[return-value]
+
+
+def _draw_chip(d: ImageDraw.ImageDraw, left: float, top: float, label: str, detail: str,
+               state: str, color: Tuple[int, int, int], scale: float) -> None:
+    """Capsule name tag: gradient fill, shine, white rim, state dot, label,
+    optional detail and a chevron (down when idle, right before a detail)."""
+    font = _font(int(12 * scale))
+    dfont = _font(int(11 * scale))
+    h = 22 * scale
+    pad = 9 * scale
+    icon = 8 * scale if state in ("thinking", "typing", "waiting_user") else 0.0
+    lw = d.textlength(label, font=font)
+    dw = d.textlength(detail, font=dfont) if detail else 0.0
+    chev = 8 * scale
+    w = pad + (icon + 5 * scale if icon else 0) + lw + 5 * scale + chev + (5 * scale + dw if detail else 0) + pad
+    r = h / 2
+    # shadow
+    d.rounded_rectangle([left + 1, top + 2 * scale, left + w + 1, top + h + 2 * scale], radius=r, fill=(0, 0, 0, 60))
+    # chip body built separately so the shine blends over the gradient
+    hi = _lighter(color)
+    W, H = max(1, int(round(w))), max(1, int(round(h)))
+    chip = Image.new("RGBA", (W, H))
+    gd = ImageDraw.Draw(chip)
+    for i in range(H):
+        f = i / max(1, H - 1)
+        gd.line([(0, i), (W, i)], fill=tuple(int(hi[k] + (color[k] - hi[k]) * f) for k in range(3)) + (250,))
+    shine = Image.new("RGBA", (W, H))
+    ImageDraw.Draw(shine).rounded_rectangle([2 * scale, 1.5 * scale, W - 2 * scale, H * 0.5], radius=r * 0.8,
+                                             fill=(255, 255, 255, 40))
+    chip = Image.alpha_composite(chip, shine)
+    ImageDraw.Draw(chip).rounded_rectangle([0, 0, W - 1, H - 1], radius=H / 2, outline=(255, 255, 255, 190),
+                                           width=max(1, int(0.75 * scale)))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=H / 2, fill=255)
+    d._image.paste(chip, (int(round(left)), int(round(top))), mask)  # type: ignore[attr-defined]
+    x = left + pad
+    cy = top + h / 2
+    if icon:
+        d.ellipse([x, cy - icon / 2, x + icon, cy + icon / 2], outline=(255, 255, 255, 255), width=max(1, int(1.5 * scale)))
+        x += icon + 5 * scale
+    d.text((x, cy), label, font=font, fill=(255, 255, 255, 255), anchor="lm")
+    x += lw + 5 * scale
+    k = chev / 2
+    if detail:  # breadcrumb: Dobby › detail
+        pts = [(x + k * 0.6, cy - k), (x + k * 1.4, cy), (x + k * 0.6, cy + k)]
+    else:  # dropdown: Dobby ⌄
+        pts = [(x, cy - k * 0.45), (x + k, cy + k * 0.45), (x + 2 * k, cy - k * 0.45)]
+    d.line(pts, fill=(255, 255, 255, 235), width=max(1, int(1.6 * scale)), joint="curve")
+    if detail:
+        d.text((x + chev + 5 * scale, cy), detail, font=dfont, fill=(255, 255, 255, 220), anchor="lm")
 
 
 _TS = re.compile(r"(\d{13}|\d{10}(?:\.\d+)?)")

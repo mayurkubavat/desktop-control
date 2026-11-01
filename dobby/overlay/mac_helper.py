@@ -8,7 +8,8 @@ when stdin closes, so it never outlives the Dobby server.
 
 What it shows:
 
-* the violet pointer with a name tag that says what Dobby is about to do,
+* the violet pointer with a capsule name tag ("Dobby ▾", widening to
+  "Dobby ▸ Click 'Run Synthesis'") that says what Dobby is about to do,
   a box around the target element (found by an Accessibility hit test),
   click ripples and a numbered trail of recent clicks;
 * a breathing glow around the window being worked on, dimmed when covered;
@@ -41,9 +42,6 @@ from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSApplicationDidChangeScreenParametersNotification,
-    NSAppearance,
-    NSAppearanceNameDarkAqua,
-    NSAttributedString,
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
@@ -56,9 +54,13 @@ from AppKit import (
     NSEventMaskScrollWheel,
     NSEventModifierFlagControl,
     NSEventModifierFlagOption,
+    NSAppearance,
+    NSAppearanceNameDarkAqua,
+    NSAttributedString,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSImage,
     NSMenu,
     NSMenuItem,
     NSPanel,
@@ -133,13 +135,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "turbo": False,
 }
 
-BADGES = {"idle": "", "thinking": " •••", "typing": " ⌨", "waiting_user": " ✋"}
 
 # Classic arrow, flipped coordinates (y down), tip at (0, 0); scaled at build.
 _ARROW = [(0, 0), (0, 18), (4.5, 14), (8, 21.5), (10.5, 20.5), (7, 13), (13, 13)]
 _ARROW_SCALE = 1.25
 _ARROW_H = 21.5 * _ARROW_SCALE
 _ARROW_W = 13 * _ARROW_SCALE
+
+# SF Symbols for the chip's state icon ("thinking" uses an animated arc).
+STATE_SYMBOLS = {"typing": "keyboard", "waiting_user": "hand.raised.fill"}
+_CHIP_H = 20.0
+_CHIP_FONT = 11.5
 
 _KEY_ESC, _KEY_P = 53, 35
 _HOTKEY_MODS = NSEventModifierFlagControl | NSEventModifierFlagOption
@@ -314,6 +320,186 @@ def _configure_overlay_window(win, cfg: Dict[str, Any], click_through: bool) -> 
 
 
 # ------------------------------------------------------------------ panels
+def _lighter(rgb, amount: float = 0.28):
+    return tuple(min(1.0, c + (1.0 - c) * amount) for c in rgb)
+
+
+def _text_width(text: str, font) -> float:
+    try:
+        attr = NSAttributedString.alloc().initWithString_attributes_(text, {NSFontAttributeName: font})
+        return float(attr.size().width)
+    except Exception:  # noqa: BLE001
+        return 6.6 * len(text)
+
+
+def _symbol_contents(name: str, scale: float):
+    """SF Symbol as white layer contents, or None when unavailable."""
+    try:
+        from AppKit import NSImageSymbolConfiguration
+
+        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
+        if img is None:
+            return None
+        cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_(10.0, 0.3)  # semibold
+        try:
+            white = NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.whiteColor()])
+            cfg = cfg.configurationByApplyingConfiguration_(white)
+        except Exception:  # noqa: BLE001 - macOS < 12: template image, tinted below
+            pass
+        img = img.imageWithSymbolConfiguration_(cfg) or img
+        return img.layerContentsForContentsScale_(scale)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class _Chip:
+    """Capsule name tag: [state icon] Dobby ▾, widening to "Dobby ▸ step".
+
+    Gradient fill with a soft top highlight (an inlaid, glassy look), a thin
+    light border and a faint shadow. Click-through like the rest of the
+    overlay: the chevron hints at the menu bar / pill for details.
+    """
+
+    def __init__(self, parent, scale: float, rgb) -> None:
+        self.scale = scale
+        self.font = NSFont.systemFontOfSize_weight_(_CHIP_FONT, 0.3)
+        self.root = CALayer.layer()
+        self.root.setContentsScale_(scale)
+        self.root.setAnchorPoint_((0.0, 1.0))
+        self.root.setShadowColor_(_cg((0, 0, 0)))
+        self.root.setShadowOpacity_(0.28)
+        self.root.setShadowRadius_(5.0)
+        self.root.setShadowOffset_((0, -2))
+        self.bg = CAGradientLayer.layer()
+        self.bg.setContentsScale_(scale)
+        self.bg.setCornerRadius_(_CHIP_H / 2)
+        self.bg.setMasksToBounds_(True)
+        self.bg.setStartPoint_((0.5, 1.0))
+        self.bg.setEndPoint_((0.5, 0.0))
+        self.bg.setBorderWidth_(0.75)
+        self.bg.setBorderColor_(_cg((1, 1, 1), 0.35))
+        self.root.addSublayer_(self.bg)
+        self.shine = CAGradientLayer.layer()
+        self.shine.setContentsScale_(scale)
+        self.shine.setStartPoint_((0.5, 1.0))
+        self.shine.setEndPoint_((0.5, 0.0))
+        self.shine.setColors_([_cg((1, 1, 1), 0.38), _cg((1, 1, 1), 0.0)])
+        self.bg.addSublayer_(self.shine)
+        self.icon = CALayer.layer()
+        self.icon.setContentsScale_(scale)
+        self.icon.setContentsGravity_("resizeAspect")
+        self.bg.addSublayer_(self.icon)
+        self.spin = CAShapeLayer.layer()
+        self.spin.setContentsScale_(scale)
+        self.spin.setFillColor_(None)
+        self.spin.setStrokeColor_(_cg((1, 1, 1), 0.95))
+        self.spin.setLineWidth_(1.6)
+        self.spin.setLineCap_("round")
+        self.spin.setStrokeEnd_(0.7)
+        self.spin.setPath_(CGPathCreateWithEllipseInRect(CGRectMake(0, 0, 10, 10), None))
+        self.spin.setBounds_(CGRectMake(0, 0, 10, 10))
+        self.spin.setOpacity_(0.0)
+        self.bg.addSublayer_(self.spin)
+        self.label = self._text_layer()
+        self.detail = self._text_layer()
+        self.chev = CALayer.layer()
+        self.chev.setContentsScale_(scale)
+        self.chev.setContentsGravity_("resizeAspect")
+        self.bg.addSublayer_(self.chev)
+        self._chev_down = _symbol_contents("chevron.down", scale)
+        self._chev_right = _symbol_contents("chevron.right", scale)
+        self._icons: Dict[str, Any] = {}
+        self._state = None
+        parent.addSublayer_(self.root)
+        self.apply_color(rgb)
+
+    def _text_layer(self):
+        t = CATextLayer.layer()
+        t.setContentsScale_(self.scale)
+        t.setFont_(self.font)
+        t.setFontSize_(_CHIP_FONT)
+        t.setForegroundColor_(_cg((1, 1, 1)))
+        t.setAlignmentMode_("left")
+        t.setTruncationMode_("end")
+        self.bg.addSublayer_(t)
+        return t
+
+    def apply_color(self, rgb) -> None:
+        CATransaction.begin()
+        CATransaction.setAnimationDuration_(0.25)
+        self.bg.setColors_([_cg(_lighter(rgb)), _cg(rgb)])
+        CATransaction.commit()
+
+    def _icon_for(self, state: str):
+        name = STATE_SYMBOLS.get(state)
+        if name is None:
+            return None
+        if name not in self._icons:
+            self._icons[name] = _symbol_contents(name, self.scale)
+        return self._icons[name]
+
+    def update(self, label: str, detail: str, state: str, x: float, y_top: float, animate: bool = True) -> None:
+        h, pad, gap = _CHIP_H, 9.0, 5.0
+        icon = self._icon_for(state)
+        thinking = state == "thinking"
+        icon_w = 11.0 if (icon is not None or thinking) else 0.0
+        lw = _text_width(label, self.font)
+        dw = min(_text_width(detail, self.font), 300.0) if detail else 0.0
+        chev_w = 8.0
+        w = pad + (icon_w + gap if icon_w else 0) + lw + gap + chev_w + (gap + dw if detail else 0) + pad
+        CATransaction.begin()
+        if animate:
+            CATransaction.setAnimationDuration_(0.28)
+            CATransaction.setAnimationTimingFunction_(
+                CAMediaTimingFunction.functionWithControlPoints____(0.34, 1.3, 0.64, 1.0)
+            )
+        else:
+            CATransaction.setDisableActions_(True)
+        self.root.setBounds_(CGRectMake(0, 0, w, h))
+        self.root.setPosition_((x, y_top))
+        self.root.setShadowPath_(CGPathCreateWithRoundedRect(CGRectMake(0, 0, w, h), h / 2, h / 2, None))
+        self.bg.setFrame_(CGRectMake(0, 0, w, h))
+        self.shine.setFrame_(CGRectMake(0, h * 0.45, w, h * 0.55))
+        cx = pad
+        if icon_w:
+            self.icon.setFrame_(CGRectMake(cx, (h - 11) / 2, 11, 11))
+            self.spin.setPosition_((cx + 5.5, h / 2))
+            cx += icon_w + gap
+        text_y = (h - _CHIP_FONT * 1.25) / 2
+        self.label.setFrame_(CGRectMake(cx, text_y, lw + 2, _CHIP_FONT * 1.3))
+        cx += lw + gap
+        self.chev.setFrame_(CGRectMake(cx, (h - 8) / 2, chev_w, 8))
+        cx += chev_w + gap
+        self.detail.setFrame_(CGRectMake(cx, text_y, dw + 2, _CHIP_FONT * 1.3))
+        CATransaction.commit()
+        CATransaction.begin()
+        CATransaction.setDisableActions_(True)
+        self.label.setString_(label)
+        self.detail.setString_(detail)
+        self.detail.setOpacity_(1.0 if detail else 0.0)
+        self.icon.setContents_(icon)
+        self.icon.setOpacity_(1.0 if icon is not None else 0.0)
+        chev = self._chev_right if detail else self._chev_down
+        if chev is not None:
+            self.chev.setContents_(chev)
+        else:  # no SF Symbols: draw a small triangle instead
+            self.chev.setContents_(None)
+            self.chev.setBackgroundColor_(None)
+        CATransaction.commit()
+        if thinking != (self._state == "thinking"):
+            self.spin.setOpacity_(1.0 if thinking else 0.0)
+            if thinking:
+                rot = CABasicAnimation.animationWithKeyPath_("transform.rotation.z")
+                rot.setFromValue_(0.0)
+                rot.setToValue_(-6.283185)
+                rot.setDuration_(0.9)
+                rot.setRepeatCount_(1e9)
+                self.spin.addAnimation_forKey_(rot, "spin")
+            else:
+                self.spin.removeAnimationForKey_("spin")
+        self._state = state
+
+
 class _Panel:
     """One click-through overlay window covering one screen."""
 
@@ -384,13 +570,7 @@ class _Panel:
         arrow.setShadowOffset_((0, -1))
         pointer.addSublayer_(arrow)
 
-        tag = CATextLayer.layer()
-        tag.setContentsScale_(self.scale)
-        tag.setFontSize_(11.0)
-        tag.setForegroundColor_(_cg((1, 1, 1)))
-        tag.setCornerRadius_(5.0)
-        tag.setAlignmentMode_("center")
-        pointer.addSublayer_(tag)
+        tag = _Chip(pointer, self.scale, rgb)
         root.addSublayer_(pointer)
 
         self.window, self.view, self.root = win, view, root
@@ -403,20 +583,16 @@ class _Panel:
         CATransaction.begin()
         CATransaction.setAnimationDuration_(0.2)
         self.arrow.setFillColor_(_cg(rgb))
-        self.tag.setBackgroundColor_(_cg(rgb))
+        self.tag.apply_color(rgb)
         self.glow.setStrokeColor_(_cg(rgb, 0.95))
         self.glow.setShadowColor_(_cg(rgb))
         self.box.setStrokeColor_(_cg(rgb))
         self.box.setFillColor_(_cg(rgb, 0.08))
         CATransaction.commit()
 
-    def set_tag(self, text: str) -> None:
-        width = 6.6 * len(text) + 14
-        CATransaction.begin()
-        CATransaction.setDisableActions_(True)
-        self.tag.setString_(text)
-        self.tag.setFrame_(CGRectMake(_ARROW_W - 2, -18, width, 17))
-        CATransaction.commit()
+    def set_tag(self, label: str, detail: str = "", state: str = "idle", animate: bool = True) -> None:
+        # Below and to the right of the arrow tip, in pointer-layer coordinates.
+        self.tag.update(label, detail, state, _ARROW_W - 4, -4, animate=animate)
 
     def close(self) -> None:
         self.window.orderOut_(None)
@@ -598,8 +774,9 @@ class OverlayController:
         screens = list(NSScreen.screens() or [])
         self.primary_h = float(screens[0].frame().size.height) if screens else 0.0
         self.panels = [_Panel(s, self.cfg, self.rgb) for s in screens]
+        label, detail = self._tag_parts()
         for p in self.panels:
-            p.set_tag(self._tag_text())
+            p.set_tag(label, detail, self.cursor_state, animate=False)
         if self.cursor is not None:
             self._place_pointer(self.cursor, 0)
             self._set_pointer_visible(True)
@@ -620,15 +797,14 @@ class OverlayController:
             return 0.0
         return max(0.0, float(ms) / 1000.0)
 
-    def _tag_text(self) -> str:
-        if self.intent_text and time.monotonic() < self.intent_until:
-            return self.intent_text
-        return self.cfg["label"] + BADGES.get(self.cursor_state, "")
+    def _tag_parts(self) -> Tuple[str, str]:
+        detail = self.intent_text if (self.intent_text and time.monotonic() < self.intent_until) else ""
+        return self.cfg["label"], detail
 
     def _refresh_tag(self) -> None:
-        text = self._tag_text()
+        label, detail = self._tag_parts()
         for p in self.panels:
-            p.set_tag(text)
+            p.set_tag(label, detail, self.cursor_state)
 
     def _set_risk(self, level: str) -> None:
         self.risk_level = level
@@ -1062,18 +1238,19 @@ class OverlayController:
             return
         working = time.monotonic() - self.last_action <= float(self.cfg["active_secs"])
         if self.paused:
-            status, title = "Paused", "‖ Dobby"
+            status, title = "Paused", "‖"
         elif self.takeover:
-            status, title = "You're in control", "✋ Dobby"
+            status, title = "You're in control", "✋"
         elif working:
-            status, title = "Working", "◆ Dobby · working"
+            status, title = "Working", "◆"
         else:
-            status, title = "Idle", "◆ Dobby"
+            status, title = "Idle", "◇"
         if self.turbo:
             status += " (Turbo)"
-            title = title.replace("◆", "⚡")
+            title = "⚡" if title in ("◆", "◇") else title
         try:
             self.status_item.button().setTitle_(title)
+            self.status_item.button().setToolTip_(f"Dobby: {status}")
             menu = NSMenu.alloc().init()
             menu.setAutoenablesItems_(False)
             self._menu_item(menu, f"Dobby: {status}")

@@ -138,6 +138,7 @@ class TrajectoryEngine:
 
         return TrajectoryExecutionResult(
             success=overall_success,
+            is_error=not overall_success,
             trajectory_name=traj_spec.trajectory_name,
             total_steps=len(traj_spec.steps),
             executed_steps=len(step_results),
@@ -563,6 +564,32 @@ class TrajectoryEngine:
                 passed = (actual_code == exp_code)
                 results.append(passed)
                 details.append(f"assert_exit_code {exp_code}: got {actual_code}")
+
+            if "assert_screen_text" in assertion:
+                expected_str = str(assertion["assert_screen_text"])
+                reg = assertion.get("region")
+                reg_tuple = tuple(reg) if reg and len(reg) == 4 else None
+                try:
+                    ocr_res = self.controller.read_screen_text(region=reg_tuple, contains=expected_str)
+                    passed = ocr_res.get("count", 0) > 0
+                except Exception as e:
+                    logger.debug(f"assert_screen_text exception: {e}")
+                    passed = False
+                results.append(passed)
+                details.append(f"assert_screen_text '{expected_str}': {passed}")
+
+            if "assert_screen_text_not_present" in assertion:
+                expected_str = str(assertion["assert_screen_text_not_present"])
+                reg = assertion.get("region")
+                reg_tuple = tuple(reg) if reg and len(reg) == 4 else None
+                try:
+                    ocr_res = self.controller.read_screen_text(region=reg_tuple, contains=expected_str)
+                    passed = ocr_res.get("count", 0) == 0
+                except Exception as e:
+                    logger.debug(f"assert_screen_text_not_present exception: {e}")
+                    passed = False
+                results.append(passed)
+                details.append(f"assert_screen_text_not_present '{expected_str}': {passed}")
 
         all_passed = all(results) if results else True
         return all_passed, details

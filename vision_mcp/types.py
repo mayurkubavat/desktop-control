@@ -1,5 +1,7 @@
 """Data types and schemas for Vision Control MCP."""
 
+from __future__ import annotations
+
 from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
@@ -219,6 +221,7 @@ class ScreenshotResult(BaseModel):
     original_width: int = Field(description="Physical desktop screen width")
     original_height: int = Field(description="Physical desktop screen height")
     scale_factor: float = Field(default=1.0, description="Scale ratio applied (e.g. 0.5 means scaled to 50%)")
+    zoom_factor: float = Field(default=1.0, description="Zoom magnification factor applied to capture")
     marks: List[UIElement] = Field(default_factory=list, description="List of interactable elements tagged with marks")
     cursor_position: Optional[tuple[int, int]] = Field(default=None, description="Pointer (x, y) at time of capture")
 
@@ -471,6 +474,7 @@ class StepExecutionResult(BaseModel):
 class TrajectoryExecutionResult(BaseModel):
     """Comprehensive outcome of executing a declarative multi-step trajectory."""
     success: bool = Field(description="Whether all required steps executed successfully")
+    is_error: bool = Field(default=False, description="Whether an unhandled step failure or error occurred")
     trajectory_name: str = Field(description="Name of the executed trajectory")
     total_steps: int = Field(default=0, description="Total steps in the trajectory")
     executed_steps: int = Field(default=0, description="Number of steps actually executed")

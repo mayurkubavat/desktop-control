@@ -67,6 +67,7 @@ class FeedbackLoopController:
         self.window_clipper = WindowClipper(hal)
         self.action_cache = ActionCache()
         self.plugin_registry = PLUGIN_REGISTRY
+        self._ax_previous_trees: Dict[str, List[UIElement]] = {}
 
         # Backward compatibility aliases
         self.atspi_inspector = self.grounding_engine._semantic.inspector
@@ -120,6 +121,7 @@ class FeedbackLoopController:
         clip_to_active_window: bool = False,
         strategy_override: Optional[str] = None,
         compress_quality: int = CONFIG.image_quality,
+        zoom_factor: float = 1.0,
     ) -> ScreenshotResult:
         """
         Captures current desktop state with Set-of-Marks, pluggable grounding,
@@ -182,6 +184,11 @@ class FeedbackLoopController:
         else:
             self.active_marks = {}
 
+        if zoom_factor > 1.0:
+            new_w = max(1, int(img.size[0] * zoom_factor))
+            new_h = max(1, int(img.size[1] * zoom_factor))
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
         self.last_clean_frame = img
         self.last_screenshot_meta = (orig_w, orig_h, scale_factor)
         b64 = self.pipeline.encode_image(img, format="JPEG", quality=compress_quality)
@@ -194,6 +201,7 @@ class FeedbackLoopController:
             original_width=orig_w,
             original_height=orig_h,
             scale_factor=scale_factor,
+            zoom_factor=zoom_factor,
             marks=marks_list,
             cursor_position=cursor_pos,
         )
@@ -1126,4 +1134,77 @@ class FeedbackLoopController:
 
         engine = VDOMQueryEngine(self.last_vdom_snapshot)
         return engine.query_selector(selector, limit=limit)
+
+    def get_accessibility_tree(
+        self,
+        app_name_filter: Optional[str] = None,
+        max_depth: int = 16,
+        filter_interactable: bool = True,
+        diff_only: bool = False,
+    ) -> Any:
+        """
+        Directly queries the OS accessibility bus (AXUIElement on macOS, AT-SPI2 on Linux).
+        Supports full tree export as well as diff-only payloads (added, removed, modified)
+        to minimize multi-turn context token explosion.
+        """
+        elements = self.atspi_inspector.inspect_desktop(
+            app_name_filter=app_name_filter,
+            max_depth=max_depth,
+            filter_interactable=filter_interactable,
+        )
+        if not diff_only:
+            return [elem.model_dump() for elem in elements]
+
+        key = app_name_filter or "__all__"
+        prev = self._ax_previous_trees.get(key)
+        if prev is None:
+            self._ax_previous_trees[key] = elements
+            return {
+                "diff_mode": True,
+                "full_tree": True,
+                "added": [elem.model_dump() for elem in elements],
+                "removed": [],
+                "modified": [],
+                "total_count": len(elements),
+            }
+
+        prev_map = {(e.role, e.name): e for e in prev}
+        curr_map = {(e.role, e.name): e for e in elements}
+
+        added = []
+        modified = []
+        for (role, name), curr_elem in curr_map.items():
+            if (role, name) not in prev_map:
+                added.append(curr_elem.model_dump())
+            else:
+                prev_elem = prev_map[(role, name)]
+                if (curr_elem.bbox.x != prev_elem.bbox.x or
+                    curr_elem.bbox.y != prev_elem.bbox.y or
+                    curr_elem.bbox.width != prev_elem.bbox.width or
+                    curr_elem.bbox.height != prev_elem.bbox.height or
+                    curr_elem.states != prev_elem.states or
+                    curr_elem.interactable != prev_elem.interactable):
+                    modified.append({
+                        "id": curr_elem.id,
+                        "role": curr_elem.role,
+                        "name": curr_elem.name,
+                        "bbox": curr_elem.bbox.model_dump(),
+                        "states": curr_elem.states,
+                        "previous_bbox": prev_elem.bbox.model_dump(),
+                    })
+
+        removed = []
+        for (role, name), prev_elem in prev_map.items():
+            if (role, name) not in curr_map:
+                removed.append({"id": prev_elem.id, "role": prev_elem.role, "name": prev_elem.name})
+
+        self._ax_previous_trees[key] = elements
+        return {
+            "diff_mode": True,
+            "full_tree": False,
+            "added": added,
+            "removed": removed,
+            "modified": modified,
+            "total_count": len(elements),
+        }
 

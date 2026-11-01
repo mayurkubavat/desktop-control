@@ -281,6 +281,24 @@ class VisionConfig(BaseModel):
         description="Max runtime in seconds for terminal commands.",
     )
 
+    # Tool Catalog & Out-of-Band State Offloading
+    output_mode: str = Field(
+        default="inline",
+        description="Output mode for MCP payloads: 'inline', 'file', or 'resource'.",
+    )
+    output_file_threshold_tokens: int = Field(
+        default=350,
+        description="Estimated token threshold above which outputs are offloaded out-of-band to disk/tmpfs.",
+    )
+    toolset_profile: str = Field(
+        default="full_developer",
+        description="Default active toolset profile: 'minimal_computer_use', 'window_mgmt', 'full_developer', 'eda_automation'.",
+    )
+    state_dir: Optional[str] = Field(
+        default=None,
+        description="Directory for RAM-backed state payload offloading (defaults to tmpfs /tmp/dc_state).",
+    )
+
 
 # Singleton default config instance
 CONFIG = VisionConfig()

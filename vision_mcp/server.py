@@ -22,12 +22,75 @@ from vision_mcp.agent_loop.controller import FeedbackLoopController
 from vision_mcp.agent_loop.trajectory import TrajectoryEngine
 from vision_mcp.types import FindElementResult, DiagnosticsResult
 from vision_mcp.config import CONFIG
+from vision_mcp.toolset import ToolSetManager, ToolDefinition, OutputMode
 
-# Initialize Server and Feedback Loop Controller
+# Initialize Server, Feedback Loop Controller, and ToolSetManager
 mcp_server = MCPServer("desktop-control")
 hal = get_desktop_hal()
 controller = FeedbackLoopController(hal)
 trajectory_engine = TrajectoryEngine(controller)
+
+toolset_manager = ToolSetManager(
+    initial_profile=CONFIG.toolset_profile,
+    output_mode=OutputMode(CONFIG.output_mode),
+    max_inline_tokens=CONFIG.output_file_threshold_tokens,
+    state_dir=CONFIG.state_dir,
+)
+
+# Register tools with ToolSetManager for dynamic capability gating
+_TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
+    # Core tools
+    "take_screenshot": ("core", "Captures desktop screen with visual perception"),
+    "click": ("core", "Emulates mouse clicks"),
+    "type_text": ("core", "Types text"),
+    "press_key": ("core", "Presses single key"),
+    "hotkey": ("core", "Presses hotkey combo"),
+    "scroll": ("core", "Scrolls mouse wheel"),
+    "manage_toolsets": ("core", "Manages active tool domains and out-of-band output mode"),
+    # Window management
+    "list_windows": ("window_mgmt", "Lists active top-level windows"),
+    "get_active_window": ("window_mgmt", "Gets currently active window"),
+    "focus_window": ("window_mgmt", "Focuses target window"),
+    "capture_window": ("window_mgmt", "Captures target or active window"),
+    "wait_for_ui_change": ("window_mgmt", "Waits for visual quiescence"),
+    # Developer tools
+    "get_accessibility_tree": ("developer", "Queries OS accessibility bus"),
+    "find_element": ("developer", "Finds element in accessibility tree"),
+    "click_and_type": ("developer", "Compound click then type"),
+    "find_and_click": ("developer", "Finds accessibility element and clicks"),
+    "move_cursor": ("developer", "Moves mouse cursor"),
+    "drag_and_drop": ("developer", "Performs mouse drag and drop"),
+    "scroll_until_visible": ("developer", "Scrolls until element is visible"),
+    "run_terminal_command": ("developer", "Executes shell command"),
+    "dismiss_obstructions": ("developer", "Detects and dismisses modals"),
+    "resolve_modal_dialog": ("developer", "Clicks button on modal dialog"),
+    "manage_cache": ("developer", "Manages self-healing action cache"),
+    "execute_trajectory": ("developer", "Executes compound deterministic trajectory"),
+    # Advanced vision
+    "configure_vision": ("advanced_vision", "Configures runtime vision parameters"),
+    "get_vision_diagnostics": ("advanced_vision", "Returns perception system health"),
+    "ask_screen": ("advanced_vision", "Answers visual questions via OCR/Gemma"),
+    "read_screen_text": ("advanced_vision", "Extracts screen text via local OCR"),
+    "find_visual_element": ("advanced_vision", "Finds visual elements without accessibility names"),
+    # Plugins
+    "list_plugins": ("plugins", "Lists discovered application plugins"),
+    "list_plugin_features": ("plugins", "Lists application features"),
+    "invoke_plugin_feature": ("plugins", "Executes high-level plugin action"),
+    "capture_pane": ("plugins", "Captures named application sub-pane"),
+    # Skills
+    "start_skill_recording": ("skills", "Begins recording trajectory"),
+    "stop_skill_recording": ("skills", "Stops recording and returns session journal"),
+    "crystallize_skill": ("skills", "Crystallizes recorded session into reusable macro"),
+    "execute_crystallized_skill": ("skills", "Executes crystallized skill with parameter substitution"),
+    "list_crystallized_skills": ("skills", "Lists all crystallized skills"),
+    "delete_crystallized_skill": ("skills", "Deletes crystallized skill"),
+    # VDOM
+    "capture_vdom": ("vdom", "Captures unified Virtual DOM snapshot"),
+    "query_vdom": ("vdom", "Zero-token spatial and semantic query on VDOM"),
+}
+
+for _name, (_dom, _desc) in _TOOL_DOMAINS.items():
+    toolset_manager.register_tool(ToolDefinition(name=_name, domain=_dom, description=_desc))
 
 
 @mcp_server.tool()
@@ -38,6 +101,7 @@ def take_screenshot(
     window_id: Optional[str] = None,
     clip_to_active_window: bool = False,
     strategy_override: Optional[str] = None,
+    zoom_factor: float = 1.0,
 ) -> Dict[str, Any]:
     """
     Captures the desktop screen with visual perception, Set-of-Marks, and optional per-window clipping.
@@ -53,9 +117,10 @@ def take_screenshot(
         window_id: Optional window identifier to clip perception strictly to window bounds (60-80% token reduction).
         clip_to_active_window: If True, automatically clips capture to currently focused window bounds.
         strategy_override: Optional strategy hotswap: 'ensemble', 'semantic', 'cv', or 'template'.
+        zoom_factor: Optional zoom magnification (e.g. 2.0) for coarse-to-fine inspection of small targets.
 
     Returns:
-        Dictionary containing image_base64, marks, resolution, and scale factor.
+        Dictionary containing image_base64, marks, resolution, scale factor, and zoom factor.
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
     result = controller.capture_state(
@@ -65,6 +130,7 @@ def take_screenshot(
         window_id=window_id,
         clip_to_active_window=clip_to_active_window,
         strategy_override=strategy_override,
+        zoom_factor=zoom_factor,
     )
     return result.model_dump()
 
@@ -171,29 +237,64 @@ def manage_cache(
 
 
 @mcp_server.tool()
+def manage_toolsets(
+    action: str = "list_domains",
+    domains: Optional[List[str]] = None,
+    output_mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Manages MCP tool domains and out-of-band payload offloading to save AI prompt tokens.
+
+    Args:
+        action: 'list_domains', 'enable', 'disable', or 'set_output_mode'.
+        domains: Optional list of domains to enable/disable (e.g. ['window_mgmt', 'vdom', 'eda_vivado']).
+        output_mode: Optional target output mode: 'inline', 'file', or 'resource'.
+
+    Returns:
+        Status dictionary with active domains, tool count, and output mode.
+    """
+    return toolset_manager.manage_toolsets(action=action, domains=domains, output_mode=output_mode)
+
+
+@mcp_server.tool()
 def get_accessibility_tree(
     app_name_filter: Optional[str] = None,
     max_depth: int = 16,
     filter_interactable: bool = True,
-) -> List[Dict[str, Any]]:
+    diff_only: bool = False,
+    output_mode: Optional[str] = None,
+) -> Any:
     """
-    Directly queries Linux AT-SPI2 (or OS accessibility bus) for the live semantic UI tree.
-    Provides ground-truth element names, roles, and physical bounding boxes without visual hallucination.
+    Directly queries OS accessibility bus (AXUIElement on macOS, AT-SPI2 on Linux)
+    for the live semantic UI tree. Provides ground-truth element names, roles, and
+    physical bounding boxes without visual hallucination.
 
     Args:
         app_name_filter: Filter to target a specific app (e.g. 'terminal', 'chrome', 'calc').
         max_depth: Maximum hierarchy recursion depth.
         filter_interactable: If True, only returns clickable or typable elements.
+        diff_only: If True, returns diff-only payload (added, removed, modified) relative
+                   to prior inspection, reducing context tokens by 80-90% on multi-turn workflows.
+        output_mode: Optional override ('inline', 'file', 'resource') for out-of-band offloading.
 
     Returns:
-        List of UIElement objects with: id, role, name, bbox [x, y, w, h], and interactable state.
+        List of UIElement objects, diff dictionary, or out-of-band file offload payload.
     """
-    elements = controller.atspi_inspector.inspect_desktop(
+    res = controller.get_accessibility_tree(
         app_name_filter=app_name_filter,
         max_depth=max_depth,
         filter_interactable=filter_interactable,
+        diff_only=diff_only,
     )
-    return [elem.model_dump() for elem in elements]
+    if isinstance(res, dict):
+        return toolset_manager.format_output("get_accessibility_tree", res, output_mode_override=output_mode)
+    elif isinstance(res, list):
+        payload = {"count": len(res), "nodes": [n.model_dump() if hasattr(n, "model_dump") else n for n in res]}
+        formatted = toolset_manager.format_output("get_accessibility_tree", payload, output_mode_override=output_mode)
+        if formatted.get("offloaded", False):
+            return formatted
+        return res
+    return res
 
 
 @mcp_server.tool()
@@ -601,6 +702,7 @@ def read_screen_text(
     region: Optional[List[int]] = None,
     contains: Optional[str] = None,
     regex: bool = False,
+    output_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Reads text on screen with local OCR (Apple Vision on macOS, RapidOCR on Linux/Windows)
@@ -611,12 +713,14 @@ def read_screen_text(
         region: Optional [x, y, width, height]; defaults to the active window.
         contains: Optional filter. Matching ignores case, spaces and underscores.
         regex: Treat ``contains`` as a regular expression.
+        output_mode: Optional override ('inline', 'file', 'resource') for out-of-band offloading.
 
     Returns:
-        {available, engine, count, lines: [{text, bbox, click_point, confidence}]}
+        {available, engine, count, lines: [{text, bbox, click_point, confidence}]} or offloaded payload.
     """
     reg_tuple = tuple(region) if region and len(region) == 4 else None
-    return controller.read_screen_text(region=reg_tuple, contains=contains, regex=regex)
+    res = controller.read_screen_text(region=reg_tuple, contains=contains, regex=regex)
+    return toolset_manager.format_output("read_screen_text", res, output_mode_override=output_mode)
 
 
 @mcp_server.tool()
@@ -1011,6 +1115,7 @@ def capture_vdom(
     window_id: Optional[str] = None,
     title_filter: Optional[str] = None,
     label_with_gemma: Optional[bool] = None,
+    output_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Unified Virtual DOM (vDOM): Captures and indexes UI state by fusing AT-SPI2
@@ -1021,14 +1126,15 @@ def capture_vdom(
         title_filter: Optional window title substring filter.
         label_with_gemma: Name unlabeled visual-only nodes with local Gemma (Set-of-Marks;
             cached per app). Defaults to the gemma3_label_vdom setting.
+        output_mode: Optional override ('inline', 'file', 'resource') for out-of-band offloading.
 
     Returns:
-        VirtualDOMSnapshot dictionary containing node hierarchy, bounds, and roles.
+        VirtualDOMSnapshot dictionary or out-of-band file offload payload.
     """
     snapshot = controller.capture_vdom(
         window_id=window_id, title_filter=title_filter, label_with_gemma=label_with_gemma
     )
-    return snapshot.model_dump()
+    return toolset_manager.format_output("capture_vdom", snapshot.model_dump(), output_mode_override=output_mode)
 
 
 @mcp_server.tool()
@@ -1037,6 +1143,7 @@ def query_vdom(
     window_id: Optional[str] = None,
     refresh: bool = False,
     limit: int = 10,
+    output_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Zero-Token Spatial & Semantic Query: Searches the in-memory Virtual DOM using CSS-like
@@ -1055,16 +1162,18 @@ def query_vdom(
         window_id: Optional target window ID if refresh is needed.
         refresh: Whether to capture a fresh snapshot before querying.
         limit: Maximum number of matched nodes to return.
+        output_mode: Optional override ('inline', 'file', 'resource') for out-of-band offloading.
         
     Returns:
-        Dictionary with count and list of matched VDOMNode models.
+        Dictionary with count and list of matched VDOMNode models, or out-of-band file offload payload.
     """
     nodes = controller.query_vdom(selector=selector, window_id=window_id, refresh=refresh, limit=limit)
-    return {
+    payload = {
         "count": len(nodes),
         "selector": selector,
         "nodes": [n.model_dump() for n in nodes],
     }
+    return toolset_manager.format_output("query_vdom", payload, output_mode_override=output_mode)
 
 
 @mcp_server.tool()

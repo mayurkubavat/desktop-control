@@ -57,6 +57,15 @@ All documents follow Obsidian-style knowledge graph formatting with YAML metadat
   * Why Gemma 3 1B is text-only while 4B-IT provides 256-token SigLIP multimodal vision at ~3.4 GB VRAM footprint.
   * Sub-millisecond BMP shared memory slicing (`/dev/shm`), 64-bit dHash perceptual caching (<0.2ms hits), and GBNF grammar-constrained JSON output.
   * Practical DV case studies: Synopsys Verdi/Vivado waveform X-propagation detection, locked IP hierarchy icons, and schematic DRC pin grounding.
+* [[macos_automation_control_and_token_efficiency|Architecting High-Efficiency Computer-Use Agents: Control Paradigms, Token Economics, and macOS Implementation]]
+  * Deep-research extraction on macOS AI Orchestration, token cost mathematics across providers, and native 4-tier escalation architecture.
+  * Tile-aligned pre-downscaling (720p HD / 516 Gemini tiles), coarse-to-fine zoom, diff-only AXTree streaming, and local Apple Neural Engine perception.
+* [[argon_round5_maintenance_and_local_models|Round 5 Architecture: Production Maintainability, Modular Codebase, and Local Model Token Reduction]]
+  * Modular Platform HAL (`protocols.py`, lazy OS factory, deterministic `MockReplayHAL` cassettes for headless CI).
+  * MCP Tool Catalog Modularization & Capability Gating (reducing 5,400-token tool schema bloat to <900 tokens).
+  * Out-of-band file offloading (`--output-mode file` / `mcp://desktop-control/state/<file>`) for dense AX trees and VDOM.
+  * Asymmetric Local Perception Shield & Hardware Partitioning (Apple Neural Engine OCR/CoreML + quantized Gemma 3 4B-IT).
+  * 8-part invariant `COMPACT_PROMPT` history compaction and Bicameral System 1/System 2 execution routing.
 * [[../learnings/vision_mcp_2_0_implementation_runbook|Vision Control MCP 2.0 Implementation Runbook & Architectural Reference]]
   * Full 5-phase production deployment: Quiescence (`XDamage`/`XFixes`), Modal Triage, Skill Crystallization (`.jou` $\rightarrow$ Jinja2), Neural vDOM Sidecar (`/dev/shm`), and Dynamic Anchor Resolution.
   * Comprehensive tool catalog, architecture flowcharts, and 100% verified test suite (62/62 tests).

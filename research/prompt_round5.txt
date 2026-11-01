@@ -1,0 +1,41 @@
+We are building and maintaining the "desktop-control" Model Context Protocol (MCP) server—a production-grade, token-efficient, cross-platform autonomous computer-use harness (supporting macOS Quartz/ScreenCaptureKit/AXUIElement, Linux X11/XDamage/AT-SPI2, and Windows UIA).
+
+We recently completed our comprehensive research on "Token-Efficient Computer Use & macOS Desktop Automation Architecture" and implemented:
+1. Fail-fast error propagation with explicit `is_error` reporting on batch trajectories.
+2. Zero-token local OCR assertions (`assert_screen_text`, `assert_screen_text_not_present`) powered by on-device Apple Vision / RapidOCR.
+3. Diff-only accessibility tree streaming (`diff_only=True`), reducing multi-turn structural token consumption by 80-90%.
+4. Coarse-to-fine cascaded zoom cropping (`zoom_factor`, `region`) to ground micro-controls without sending 4K images.
+
+Now, we want to dive into Round 5 of our deep research: Production Maintainability, Modular Codebase Architecture, and Maximizing AI Token Efficiency through Local Models (Gemma 3, CoreML OmniParser v2, Apple Neural Engine, and local vision SLMs).
+
+Please provide your rigorous, deep architectural analysis, concrete Python blueprints, and implementation strategies for the following three core pillars:
+
+---
+
+### Pillar 1: Long-Term Maintenance & Codebase Structure of `desktop-control` MCP
+As our tool ecosystem expands to 40+ primitives (hal, vision, vdom, crystallization, trajectory dispatcher, modal triage, eda plugins for Vivado/Verdi):
+1. **Modular Platform HAL & CI Architecture**: How to structure the hardware abstraction layer (`IDesktopHAL`, `MacHAL`, `LinuxHAL`, `WindowsHAL`) so platform-specific imports (pyobjc, Quartz, ApplicationServices, python-xlib, pywin32) stay strictly isolated, self-testing, and fully mockable in headless CI environments without physical displays or X11/WindowServer.
+2. **MCP Tool Catalog Modularization & Deferred Schema Loading**: Having 40+ tools loaded into Claude Desktop / Antigravity IDE consumes 4,000–6,000 prompt tokens before the first user message. How should we architect tool grouping, dynamic tool sub-sets (e.g. `minimal_computer_use`, `full_developer`, `eda_automation`), and MCP resource-backed / file-backed deferred loading (`--output-mode file`)?
+3. **Application Plugin Architecture Evolution**: Best practices for maintaining declarative application plugins (Vivado, Verdi, Chrome) with version migrations, sub-pane ROI tracking across display scale factors, and self-healing when application UI themes or layouts change.
+
+---
+
+### Pillar 2: Slashing Cloud AI Tokens Using Local Models (Gemma 3 & Local SLMs)
+Frontier cloud models (Claude Sonnet/Opus, Gemini 3/4 Argon, GPT-5) cost $2–$15 per 1M tokens and explode quadratically in multi-turn desktop loops ($25–$72/task on OSWorld 2.0). How do we use local models (Gemma 3 4B-IT, Qwen2.5-VL-7B, CoreML OmniParser v2, Apple Vision OCR) as an asymmetric local shield?
+1. **Asymmetric Local Perception & Coordinate Grounding**:
+   - Running tiled local detectors on the Apple Neural Engine (ANE) / local GPU to convert continuous mouse coordinate regression into discrete Set-of-Marks token selection.
+   - How to architect a fast, sub-50ms local grounding pipeline that handles both text-labeled buttons and icon-only controls without calling cloud VLMs.
+2. **Local History Compaction & Memory Distillation**:
+   - Using local Gemma 3 (via Ollama or local llama-server) to execute the 8-part invariant `COMPACT_PROMPT` contract (User Instructions, Task Template, Constraints, Actions Taken, Errors & Fixes, Progress, Current State, Next Step) right before cloud context eviction, ensuring zero cloud token cost for summarization passes.
+3. **Local State Verification & System 1 / System 2 Bicameral Routing**:
+   - Designing a bicameral loop: Fast local "System 1" (Gemma 3 / OCR / diff-checker) verifies routine step completion, button clicks, and modal triage (<100ms, $0), only escalating to the cloud "System 2" planner when novel visual ambiguity or execution errors occur.
+4. **VRAM and Resource Management on Developer Laptops**:
+   - How to manage local SLM memory on Apple Silicon (unified memory) and Linux workstations to eliminate VRAM thrashing between vision detectors (ONNX/CoreML) and local LLMs (Ollama/llama.cpp).
+
+---
+
+### Pillar 3: Concrete Implementation Blueprints & Code
+Provide production-ready Python code snippets, Pydantic schemas, and state machine designs for:
+1. A modular `ToolSetManager` or `PluginDispatcher` for deferred / namespaced tool loading in MCP.
+2. A local `BicameralStepController` that routes verification and grounding to local Gemma 3 / OCR before falling back to cloud VLM calls.
+3. An automated end-to-end integration test harness mocking multi-turn desktop trajectories with simulated visual deltas and local SLM assertions.

@@ -158,8 +158,32 @@ COMPRESS = PromptSpec(
     max_tokens=400,
 )
 
+ADK_VERIFIER = PromptSpec(
+    id="adk_verifier",
+    version=1,
+    system=(
+        "You verify one step of a desktop automation run. You get the step's expected outcome and what "
+        "the screen shows now: the text a text reader found and the accessible UI elements.\n"
+        "- outcome pass: the observation shows the expected outcome.\n"
+        "- outcome fail: the observation shows it did not happen (an error, the old state, a different state).\n"
+        "- outcome unsure: the observation does not show enough to tell. A wrong pass is the worst answer.\n"
+        "- evidence: the exact words from the observation you relied on, or empty with unsure.\n"
+        "Judge only from the observation; do not assume anything that is not listed."
+    ),
+    schema={},  # vision_mcp.adk.judges.Verdict
+    max_tokens=120,
+)
+
+ADK_TRIAGE = PromptSpec(
+    id="adk_triage",
+    version=1,
+    system=MODAL_TRIAGE.system + "\nYou get the dialog's text and buttons as read from the screen.",
+    schema={},  # vision_mcp.adk.judges.DialogTriage
+    max_tokens=150,
+)
+
 PROMPTS: Dict[str, PromptSpec] = {
-    p.id: p for p in (YES_NO, MODAL_TRIAGE, MARK_LABEL, MARK_FIND, GROUND_ROI, COMPRESS)
+    p.id: p for p in (YES_NO, MODAL_TRIAGE, MARK_LABEL, MARK_FIND, GROUND_ROI, COMPRESS, ADK_VERIFIER, ADK_TRIAGE)
 }
 
 

@@ -1,0 +1,9 @@
+{
+ "name": "example_click",
+ "goal": "Run synthesis and acknowledge the result",
+ "steps": [
+  {"tool": "click", "args": {"x": 100, "y": 134}, "expect": {"text": "Running synth_design"}},
+  {"tool": "press_key", "args": {"key": "Return"},
+   "expect": {"question": "Did synthesis complete successfully?", "allow_dialog": true}, "settle_ms": 0}
+ ]
+}

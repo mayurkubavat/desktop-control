@@ -39,6 +39,11 @@ macos = [
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
     "onnxruntime>=1.17; sys_platform == 'darwin'",
 ]
+# ADK agent pipeline (python -m vision_mcp.adk): Gemma judges via LiteLLM -> Ollama
+adk = [
+    "google-adk>=2.13",
+    "litellm>=1.80",
+]
 dev = [
     "onnx>=1.16",
     "onnxruntime>=1.17",

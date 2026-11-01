@@ -404,6 +404,13 @@ class FeedbackLoopController:
         all_passed = all(results) if contract.require_all else any(results)
         return all_passed, details
 
+    def _replay_backend(self):
+        """The MockReplayHAL behind this controller, if it is replaying a cassette."""
+        from vision_mcp.hal.mock_replay import MockReplayHAL
+
+        backend = getattr(self.hal, "backend", self.hal)
+        return backend if isinstance(backend, MockReplayHAL) else None
+
     def _ocr_available(self) -> bool:
         ocr = getattr(self, "ocr", None)
         return ocr is not None and ocr.is_available
@@ -476,6 +483,13 @@ class FeedbackLoopController:
         regex: bool = False,
     ) -> Dict[str, Any]:
         """Text on screen via local OCR, optionally filtered, with click points. No image returned."""
+        recorded = self._replay_backend()
+        if recorded is not None:
+            # A cassette carries the OCR that was recorded with each frame; use it, not a live engine.
+            lines = list(recorded.current_state.ocr_boxes)
+            if contains:
+                lines = [b for b in lines if text_matches(contains, str(b.get("text", "")), regex=regex)]
+            return {"available": True, "engine": "cassette", "count": len(lines), "lines": lines}
         if not self._ocr_available():
             return {"available": False, "engine": self.ocr.name, "lines": [], "diagnostics": self.ocr.diagnostics()}
         lines = self.read_screen_lines(region)
@@ -1249,6 +1263,9 @@ class FeedbackLoopController:
         Supports full tree export as well as diff-only payloads (added, removed, modified)
         to minimize multi-turn context token explosion.
         """
+        recorded = self._replay_backend()
+        if recorded is not None and not diff_only:
+            return list((recorded.current_state.ax_tree or {}).get("nodes", []))
         elements = self.atspi_inspector.inspect_desktop(
             app_name_filter=app_name_filter,
             max_depth=max_depth,

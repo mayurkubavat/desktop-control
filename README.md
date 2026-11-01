@@ -230,6 +230,10 @@ Record new ones from a live session with `start_cassette_recording` / `stop_cass
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
+## ADK pipeline (optional)
+
+`pip install -e '.[adk]'`, then `python -m vision_mcp.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/desktop-control/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
+
 ## Agent skills plugin
 
 `plugins/desktop-control/` is a Claude Code plugin of skills that teach an agent

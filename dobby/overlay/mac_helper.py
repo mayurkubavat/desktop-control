@@ -41,6 +41,9 @@ from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSApplicationDidChangeScreenParametersNotification,
+    NSAppearance,
+    NSAppearanceNameDarkAqua,
+    NSAttributedString,
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
@@ -54,6 +57,8 @@ from AppKit import (
     NSEventModifierFlagControl,
     NSEventModifierFlagOption,
     NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
     NSMenu,
     NSMenuItem,
     NSPanel,
@@ -277,6 +282,12 @@ class _PillButton(NSButton):
     def acceptsFirstMouse_(self, _event):
         return True  # one click works even though the pill never becomes key
 
+    def set_label(self, text: str) -> None:
+        # The helper app is never active, so plain titles draw in the dim
+        # inactive colour and vanish on the dark pill; force white.
+        attrs = {NSForegroundColorAttributeName: NSColor.whiteColor(), NSFontAttributeName: self.font()}
+        self.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(text, attrs))
+
 
 def _configure_overlay_window(win, cfg: Dict[str, Any], click_through: bool) -> None:
     win.setTitle_(protocol.OVERLAY_WINDOW_TITLE)
@@ -424,6 +435,7 @@ class _Pill:
             ((0, 0), (300, self.H)), style, NSBackingStoreBuffered, False
         )
         _configure_overlay_window(win, cfg, click_through=False)
+        win.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
         view = NSView.alloc().initWithFrame_(((0, 0), (300, self.H)))
         view.setWantsLayer_(True)
         view.layer().setBackgroundColor_(_cg((0.11, 0.09, 0.16), 0.94))
@@ -449,8 +461,8 @@ class _Pill:
         self.mode = mode
         self.label.setStringValue_(text)
         self.label.sizeToFit()
-        self.primary.setTitle_(primary)
-        self.secondary.setTitle_(secondary)
+        self.primary.set_label(primary)
+        self.secondary.set_label(secondary)
         self.primary.sizeToFit()
         self.secondary.sizeToFit()
         lw = self.label.frame().size.width

@@ -43,6 +43,7 @@ from vision_mcp.types import (
     SubPaneLayoutSpec,
 )
 from vision_mcp.config import CONFIG
+from vision_mcp.perception.ocr import OCRLine, assign_text_to_boxes, get_ocr_engine, text_matches
 from vision_mcp.plugins.registry import PluginRegistry, PLUGIN_REGISTRY
 from vision_mcp.plugins.base import BaseUIAppPlugin
 
@@ -71,6 +72,7 @@ class FeedbackLoopController:
         self.cv_detector = self.grounding_engine._cv.detector
 
         self.neural_grounder = LocalNeuralGrounder()
+        self.ocr = get_ocr_engine()
         gemma = self.neural_grounder.gemma3_grounder
         modal_classifier = None
         if gemma is not None and CONFIG.gemma3_modal_tiebreak:
@@ -304,6 +306,15 @@ class FeedbackLoopController:
                     matching = [el for el in elements if pattern.search(el.name)]
                     passed = len(matching) > 0
                     msg = f"TEXT_APPEARED: found {len(matching)} elements matching '{assertion.target_name_regex}'"
+                    if not passed and self._ocr_available():
+                        # Canvases and custom widgets expose no AT-SPI text: read the pixels locally
+                        ocr_hits = [
+                            ln for ln in self.read_screen_lines()
+                            if text_matches(assertion.target_name_regex or ".*", ln.text, regex=True)
+                            or text_matches(assertion.target_name_regex or "", ln.text)
+                        ]
+                        passed = len(ocr_hits) > 0
+                        msg = f"TEXT_APPEARED (OCR): found {len(ocr_hits)} lines matching '{assertion.target_name_regex}'"
 
                 elif assertion.assertion_type == StateAssertionType.CURSOR_CHANGED:
                     if self.quiescence_monitor and self.quiescence_monitor.is_available:
@@ -341,6 +352,48 @@ class FeedbackLoopController:
 
         all_passed = all(results) if contract.require_all else any(results)
         return all_passed, details
+
+    def _ocr_available(self) -> bool:
+        ocr = getattr(self, "ocr", None)
+        return ocr is not None and ocr.is_available
+
+    def _default_region(self) -> Optional[Tuple[int, int, int, int]]:
+        try:
+            win = self.hal.get_active_window()
+            if win and win.bbox.width > 0 and win.bbox.height > 0:
+                return (win.bbox.x, win.bbox.y, win.bbox.width, win.bbox.height)
+        except Exception:
+            pass
+        return None
+
+    def read_screen_lines(self, region: Optional[Tuple[int, int, int, int]] = None) -> List[OCRLine]:
+        """OCR lines in screen coordinates for ``region`` (default: the active window)."""
+        if not self._ocr_available():
+            return []
+        region = region or self._default_region()
+        img = self.hal.capture_screen(region=region)
+        ox, oy = (region[0], region[1]) if region else (0, 0)
+        return [ln.shifted(ox, oy) for ln in self.ocr.recognize(img)]
+
+    def read_screen_text(
+        self,
+        region: Optional[Tuple[int, int, int, int]] = None,
+        contains: Optional[str] = None,
+        regex: bool = False,
+    ) -> Dict[str, Any]:
+        """Text on screen via local OCR, optionally filtered, with click points. No image returned."""
+        if not self._ocr_available():
+            return {"available": False, "engine": self.ocr.name, "lines": [], "diagnostics": self.ocr.diagnostics()}
+        lines = self.read_screen_lines(region)
+        if contains:
+            lines = [ln for ln in lines if text_matches(contains, ln.text, regex=regex)]
+        lines.sort(key=lambda ln: (ln.y, ln.x))
+        return {
+            "available": True,
+            "engine": self.ocr.name,
+            "count": len(lines),
+            "lines": [ln.as_dict() for ln in lines],
+        }
 
     def ask_screen(
         self,
@@ -903,6 +956,26 @@ class FeedbackLoopController:
         # Neural / CV visual proposals
         visual_props = self.neural_grounder.generate_proposals(img, offset=(win_bbox.x, win_bbox.y))
 
+        # Local OCR: name empty detector boxes, add free-standing text as static_text
+        if CONFIG.ocr_in_vdom and self._ocr_available():
+            lines = [ln.shifted(win_bbox.x, win_bbox.y) for ln in self.ocr.recognize(img)]
+            assign_text_to_boxes(visual_props, lines)
+            for ln in lines:
+                inside_any = any(
+                    p["bbox"]["x"] <= ln.center[0] <= p["bbox"]["x"] + p["bbox"]["width"]
+                    and p["bbox"]["y"] <= ln.center[1] <= p["bbox"]["y"] + p["bbox"]["height"]
+                    for p in visual_props
+                    if p.get("named_by") == "ocr"
+                )
+                if not inside_any:
+                    visual_props.append({
+                        "bbox": {"x": ln.x, "y": ln.y, "width": ln.width, "height": ln.height},
+                        "confidence": ln.confidence,
+                        "class_name": "static_text",
+                        "text": ln.text,
+                        "named_by": "ocr",
+                    })
+
         # AT-SPI2 accessibility elements
         atspi_elements = []
         try:
@@ -967,14 +1040,33 @@ class FeedbackLoopController:
         number, and the click point comes from the detector box.
         """
         gemma = self.neural_grounder.gemma3_grounder
-        if gemma is None:
-            return {"found": False, "reason": "Gemma sidecar disabled"}
         if region is None:
-            win = self.hal.get_active_window()
-            if win and win.bbox.width > 0 and win.bbox.height > 0:
-                region = (win.bbox.x, win.bbox.y, win.bbox.width, win.bbox.height)
+            region = self._default_region()
         ox, oy = (region[0], region[1]) if region else (0, 0)
         img = self.hal.capture_screen(region=region)
+
+        # Cheapest first: an exact visible-text match needs no model at all
+        if self._ocr_available():
+            needle = description
+            for suffix in (" button", " field", " tab", " menu", " icon", " link"):
+                if needle.lower().endswith(suffix):
+                    needle = needle[: -len(suffix)]
+            hits = [ln for ln in self.ocr.recognize(img) if needle.strip() and text_matches(needle, ln.text)]
+            if hits:
+                hits.sort(key=lambda ln: len(ln.text))  # tightest label wins
+                ln = hits[0].shifted(ox, oy)
+                return {
+                    "found": True,
+                    "bbox": {"x": ln.x, "y": ln.y, "width": ln.width, "height": ln.height},
+                    "click_point": list(ln.center),
+                    "candidates": len(hits),
+                    "confidence": ln.confidence,
+                    "reason": f"OCR text '{ln.text}'",
+                    "source": "ocr",
+                }
+
+        if gemma is None:
+            return {"found": False, "reason": "No OCR match and Gemma sidecar disabled"}
         proposals = self.neural_grounder.generate_proposals(img, offset=(0, 0))
         # Largest-first keeps real controls ahead of glyph fragments when capped
         proposals.sort(key=lambda p: p["bbox"]["width"] * p["bbox"]["height"], reverse=True)

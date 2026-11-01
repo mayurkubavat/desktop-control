@@ -552,6 +552,7 @@ def get_vision_diagnostics() -> Dict[str, Any]:
         active_window=active_win.title if active_win else None,
         config_summary=CONFIG.model_dump(),
         gemma=_gemma_diagnostics(),
+        ocr=controller.ocr.diagnostics() if getattr(controller, "ocr", None) else None,
     )
     return diag.model_dump()
 
@@ -588,12 +589,36 @@ def ask_screen(question: str, region: Optional[List[int]] = None) -> Dict[str, A
 
 
 @mcp_server.tool()
+def read_screen_text(
+    region: Optional[List[int]] = None,
+    contains: Optional[str] = None,
+    regex: bool = False,
+) -> Dict[str, Any]:
+    """
+    Reads text on screen with local OCR (Apple Vision on macOS, RapidOCR on Linux/Windows)
+    and returns lines with boxes and click points. No image is returned, so this costs a
+    few hundred text tokens instead of a screenshot.
+
+    Args:
+        region: Optional [x, y, width, height]; defaults to the active window.
+        contains: Optional filter. Matching ignores case, spaces and underscores.
+        regex: Treat ``contains`` as a regular expression.
+
+    Returns:
+        {available, engine, count, lines: [{text, bbox, click_point, confidence}]}
+    """
+    reg_tuple = tuple(region) if region and len(region) == 4 else None
+    return controller.read_screen_text(region=reg_tuple, contains=contains, regex=regex)
+
+
+@mcp_server.tool()
 def find_visual_element(description: str, region: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Finds an element by description where accessibility gives no names (canvases,
-    custom Qt/Tk widgets, EDA toolbars). The local detector proposes boxes, local
-    Gemma picks one by number, and the click point comes from the detector box,
-    never from the model. No image is returned.
+    custom Qt/Tk widgets, EDA toolbars). Tries local OCR for a visible-text match
+    first; otherwise the local detector proposes boxes, local Gemma picks one by
+    number, and the click point comes from the detector box, never from the model.
+    No image is returned.
 
     Args:
         description: What to find, e.g. "Run Simulation button" or "zoom fit icon".

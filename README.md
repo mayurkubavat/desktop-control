@@ -40,6 +40,9 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install in editable mode
 pip install -e .
+
+# Optional local OCR lane (RapidOCR on Linux/Windows, Apple Vision on macOS)
+pip install -e ".[ocr]"
 ```
 
 To run the test suite:
@@ -87,7 +90,7 @@ Add `desktop-control` to your MCP client configuration file:
 
 ---
 
-## Available Tools (39 Tools)
+## Available Tools (40 Tools)
 
 ### Screen Perception & Window Management
 | Tool | Description |
@@ -121,6 +124,7 @@ Add `desktop-control` to your MCP client configuration file:
 | `find_and_click` | Finds an element by label and clicks it in a single step. |
 | `get_accessibility_tree` | Retrieves the accessibility tree (AT-SPI2) for open applications. |
 | `capture_vdom` | Fuses accessibility and visual elements into an indexed virtual DOM; `label_with_gemma` names unlabeled visual nodes with local Gemma. |
+| `read_screen_text` | Reads on-screen text with local OCR (Apple Vision on macOS, RapidOCR on Linux/Windows); returns lines and click points, no image. |
 | `find_visual_element` | Finds an unlabeled element by description: detector boxes, local Gemma picks one by number, click point from the detector. |
 | `query_vdom` | Queries the virtual DOM using CSS-style selectors (e.g., `push_button`, `tab_item`). |
 

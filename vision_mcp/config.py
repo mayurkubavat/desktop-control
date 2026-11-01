@@ -101,6 +101,20 @@ class VisionConfig(BaseModel):
         description="Number of intra-op threads for ONNX Runtime CPU inference.",
     )
 
+    # Local OCR lane
+    ocr_engine: str = Field(
+        default="auto",
+        description="OCR backend: 'auto' (Apple Vision on macOS, RapidOCR elsewhere), 'apple_vision', 'rapidocr', or 'none'.",
+    )
+    ocr_min_confidence: float = Field(
+        default=0.5,
+        description="Drop OCR lines below this recognition confidence.",
+    )
+    ocr_in_vdom: bool = Field(
+        default=True,
+        description="Run OCR during capture_vdom: name empty detector boxes and add free text as static_text nodes.",
+    )
+
     # Local Gemma 3 Multimodal Sidecar Plugin
     enable_gemma3_sidecar: bool = Field(
         default=True,

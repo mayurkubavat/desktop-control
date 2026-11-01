@@ -272,6 +272,7 @@ class DiagnosticsResult(BaseModel):
         default=None,
         description="Local Gemma sidecar status: models, availability, call counts, latency, cache hits",
     )
+    ocr: Optional[Dict[str, Any]] = Field(default=None, description="Local OCR engine status and call stats")
 
 
 class SubPaneROI(BaseModel):

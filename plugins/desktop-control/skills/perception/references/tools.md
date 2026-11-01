@@ -2,7 +2,7 @@
 
 # desktop-control MCP tools
 
-45 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
+48 tools. Only `core` is on by default; enable others with `manage_toolsets(action="enable", domains=[...])`.
 
 ## core
 
@@ -53,6 +53,9 @@
 | `configure_vision` | `setting`, `value` | Dynamically hotswaps runtime settings for grounding, tokens, and safety. |
 | `get_vision_diagnostics` | none | Returns diagnostic health check of the Vision MCP server, active display, available perception backends, and current configuration. |
 | `choose_option` | `goal`, `options`, `question='Which option best advances the goal?'`, `state=''`, `verb='click'`, `authorized=False`, `shortlist_to=12` | Asks the local Gemma model to pick one of ``options`` and gates the answer by risk (Jev-style typed decision: no text is generated, probabilities come from logprobs). |
+| `get_screen_state` | `app_name_filter=None`, `use_ocr=True`, `max_elements=60`, `as_text=True` | Observes the active window as a numbered, text-only list of elements (e1, e2, ...) merged from the accessibility tree and OCR, with the operations valid right now (``type`` only when an editable, non-secure field has focus). No image tokens. |
+| `act_on_element` | `eid`, `generation`, `action='click'`, `text=None`, `press_enter=False`, `app_name_filter=None` | Clicks, double-clicks or types on an element from get_screen_state, after re-binding it on a fresh observation (by role and label, nearest to its old place). |
+| `decide_next_element` | `goal`, `verb='click'`, `authorized=False`, `shortlist_to=12`, `app_name_filter=None` | Observes the screen, shortlists elements by word overlap with the goal, and lets the local Gemma pick one (probabilities from logprobs), gated by the verb's risk. Nothing is clicked. When ``gate.verdict`` is "act", call act_on_element with the returned ``eid`` and ``generation``; "escalate" means decide yourself; "stop" means do not act. |
 | `find_visual_element` | `description`, `region=None` | Finds an element by description where accessibility gives no names (canvases, custom Qt/Tk widgets, EDA toolbars). Tries local OCR for a visible-text match first; otherwise the local detector proposes boxes, local Gemma picks one by number, and the click point comes from the detector box, never from the model. No image is returned. |
 
 ## vdom

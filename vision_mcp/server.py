@@ -124,6 +124,9 @@ _TOOL_DOMAINS: Dict[str, tuple[str, str]] = {
     "configure_vision": ("advanced_vision", "Configures runtime vision parameters"),
     "get_vision_diagnostics": ("advanced_vision", "Returns perception system health"),
     "ask_screen": ("core", "Answers visual questions via OCR/Gemma"),
+    "get_screen_state": ("advanced_vision", "Numbered text-only view of the active window (AX + OCR) with valid operations"),
+    "act_on_element": ("advanced_vision", "Clicks or types on a screen-state element after re-binding it on a fresh frame"),
+    "decide_next_element": ("advanced_vision", "Local Gemma picks the next screen-state element for a goal, gated by risk"),
     "choose_option": ("advanced_vision", "Local Gemma picks one option with calibrated probabilities, gated by risk"),
     "read_screen_text": ("core", "Extracts screen text via local OCR"),
     "find_visual_element": ("advanced_vision", "Finds visual elements without accessibility names"),
@@ -874,6 +877,114 @@ def choose_option(
         return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
     result = gate(decision, verb, authorized=authorized)
     return {"decision": decision.as_dict(), "gate": result.as_dict(), "shortlisted": len(picked) < len(options)}
+
+
+_screen_tracker = None
+
+
+def _tracker():
+    global _screen_tracker
+    if _screen_tracker is None:
+        from vision_mcp.screen_state import StateTracker
+
+        _screen_tracker = StateTracker()
+    return _screen_tracker
+
+
+@mcp_server.tool()
+def get_screen_state(
+    app_name_filter: Optional[str] = None,
+    use_ocr: bool = True,
+    max_elements: int = 60,
+    as_text: bool = True,
+) -> Dict[str, Any]:
+    """
+    Observes the active window as a numbered, text-only list of elements (e1, e2, ...)
+    merged from the accessibility tree and OCR, with the operations valid right now
+    (``type`` only when an editable, non-secure field has focus). No image tokens.
+
+    Pass the returned ``generation`` and an element id to act_on_element; it re-binds
+    the element on a fresh frame and refuses if it vanished or moved.
+
+    Args:
+        app_name_filter: Optional app to inspect (default: the frontmost app).
+        use_ocr: Also read text with local OCR (names unlabeled controls, adds text-only targets).
+        max_elements: Cap on elements returned.
+        as_text: Return the compact text view (default) instead of full element dicts.
+    """
+    from vision_mcp.screen_state.observe import observe
+
+    state = observe(controller, _tracker(), app_name_filter=app_name_filter, use_ocr=use_ocr)
+    out = {"generation": state.generation, "element_count": len(state.elements), "operations": state.operations}
+    if as_text:
+        out["state"] = state.to_text(max_elements=max(1, int(max_elements)))
+    else:
+        out.update(state.as_dict(max_elements=max(1, int(max_elements))))
+    return out
+
+
+@mcp_server.tool()
+def act_on_element(
+    eid: str,
+    generation: int,
+    action: str = "click",
+    text: Optional[str] = None,
+    press_enter: bool = False,
+    app_name_filter: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Clicks, double-clicks or types on an element from get_screen_state, after re-binding
+    it on a fresh observation (by role and label, nearest to its old place).
+
+    Refuses when the element is gone, moved too far, disabled, or (for type) not
+    editable or a password field. Returns the new generation and what changed.
+
+    Args:
+        eid: Element id such as "e7" from get_screen_state.
+        generation: The generation that eid came from.
+        action: "click", "double_click" or "type".
+        text: Text to type (action "type"); typed after a click that focuses the element.
+        press_enter: Press Return after typing (kept off by default: a separate step).
+        app_name_filter: Same filter used for get_screen_state, if any.
+    """
+    from vision_mcp.screen_state.observe import act_on_element as _act
+
+    return _act(controller, _tracker(), eid, generation, action=action, text=text,
+                press_enter=press_enter, app_name_filter=app_name_filter)
+
+
+@mcp_server.tool()
+def decide_next_element(
+    goal: str,
+    verb: str = "click",
+    authorized: bool = False,
+    shortlist_to: int = 12,
+    app_name_filter: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Observes the screen, shortlists elements by word overlap with the goal, and lets
+    the local Gemma pick one (probabilities from logprobs), gated by the verb's risk.
+    Nothing is clicked. When ``gate.verdict`` is "act", call act_on_element with the
+    returned ``eid`` and ``generation``; "escalate" means decide yourself; "stop" means do not act.
+
+    Args:
+        goal: What the user wants done next (e.g. "save the document").
+        verb: The action that follows (click, type, send, delete, ...): sets the risk tier.
+        authorized: True only when the user explicitly asked for this consequential action.
+        shortlist_to: Maximum elements shown to Gemma (<= 25).
+        app_name_filter: Optional app to inspect.
+    """
+    from vision_mcp.gemma.decide import GemmaError
+    from vision_mcp.screen_state.observe import decide_next_element as _decide
+
+    grounder = getattr(getattr(controller, "neural_grounder", None), "gemma3_grounder", None)
+    if grounder is None:
+        return {"error": "local Gemma is not enabled (enable_gemma3_sidecar)", "gate": {"verdict": "escalate"}}
+    try:
+        return _decide(controller, _tracker(), grounder.decider(), goal, verb=verb, authorized=authorized,
+                       k=shortlist_to, app_name_filter=app_name_filter)
+    except (GemmaError, ValueError) as e:
+        return {"error": str(e), "gate": {"verdict": "escalate", "reason": "Gemma unavailable"}}
 
 
 @mcp_server.tool()

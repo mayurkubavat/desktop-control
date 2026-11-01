@@ -178,8 +178,8 @@ def _lighter(rgb: Tuple[int, int, int], f: float = 0.35) -> Tuple[int, int, int]
 
 def _draw_chip(d: ImageDraw.ImageDraw, left: float, top: float, label: str, detail: str,
                state: str, color: Tuple[int, int, int], scale: float) -> None:
-    """Capsule name tag: gradient fill, shine, white rim, state dot, label,
-    optional detail and a chevron (down when idle, right before a detail)."""
+    """Capsule name tag: gradient fill, shine, white rim, state dot, label and,
+    while a step runs, a › breadcrumb and its detail (no chevron when idle)."""
     font = _font(int(12 * scale))
     dfont = _font(int(11 * scale))
     h = 22 * scale
@@ -188,7 +188,8 @@ def _draw_chip(d: ImageDraw.ImageDraw, left: float, top: float, label: str, deta
     lw = d.textlength(label, font=font)
     dw = d.textlength(detail, font=dfont) if detail else 0.0
     chev = 8 * scale
-    w = pad + (icon + 5 * scale if icon else 0) + lw + 5 * scale + chev + (5 * scale + dw if detail else 0) + pad
+    crumb = 5 * scale + chev + 5 * scale + dw if detail else 0.0
+    w = pad + (icon + 5 * scale if icon else 0) + lw + crumb + pad
     r = h / 2
     # shadow
     d.rounded_rectangle([left + 1, top + 2 * scale, left + w + 1, top + h + 2 * scale], radius=r, fill=(0, 0, 0, 60))
@@ -215,14 +216,11 @@ def _draw_chip(d: ImageDraw.ImageDraw, left: float, top: float, label: str, deta
         d.ellipse([x, cy - icon / 2, x + icon, cy + icon / 2], outline=(255, 255, 255, 255), width=max(1, int(1.5 * scale)))
         x += icon + 5 * scale
     d.text((x, cy), label, font=font, fill=(255, 255, 255, 255), anchor="lm")
-    x += lw + 5 * scale
-    k = chev / 2
     if detail:  # breadcrumb: Dobby › detail
+        x += lw + 5 * scale
+        k = chev / 2
         pts = [(x + k * 0.6, cy - k), (x + k * 1.4, cy), (x + k * 0.6, cy + k)]
-    else:  # dropdown: Dobby ⌄
-        pts = [(x, cy - k * 0.45), (x + k, cy + k * 0.45), (x + 2 * k, cy - k * 0.45)]
-    d.line(pts, fill=(255, 255, 255, 235), width=max(1, int(1.6 * scale)), joint="curve")
-    if detail:
+        d.line(pts, fill=(255, 255, 255, 235), width=max(1, int(1.6 * scale)), joint="curve")
         d.text((x + chev + 5 * scale, cy), detail, font=dfont, fill=(255, 255, 255, 220), anchor="lm")
 
 

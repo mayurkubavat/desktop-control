@@ -129,6 +129,12 @@ def test_overlay_config():
         "turbo": True, "takeover_resume": "manual", "idle_secs": 0.5, "trail": False}
 
 
+def test_overlay_config_menu_bar_icon_is_opt_in():
+    assert "menu_bar" not in overlay_config({})
+    assert overlay_config({"DOBBY_OVERLAY_MENU_BAR": "1"}) == {"menu_bar": True}
+    assert "menu_bar" not in overlay_config({"DOBBY_OVERLAY_MENU_BAR": "0"})
+
+
 def test_wrap_hal_is_noop_when_disabled():
     hal = object()
     assert wrap_hal(hal, overlay=NullOverlay()) is hal

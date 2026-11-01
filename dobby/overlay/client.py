@@ -6,7 +6,7 @@ on Linux/Windows, in tests and in cassette replay. ``OverlayClient`` spawns
 (helper missing, crashed, too slow) disables the client for the rest of the
 session: the overlay must never block or break an action.
 
-The helper also talks back: the Stop pill, the menu bar icon, the hotkeys and
+The helper also talks back: the control bar, Dobby's menu, the hotkeys and
 user take-over send events that :meth:`OverlayClient.checkpoint` turns into a
 pause, an :class:`OverlayStopped` or an :class:`OverlayInterrupted` before the
 next action.
@@ -329,8 +329,8 @@ class OverlayClient(NullOverlay):
     def checkpoint(self, max_wait: float = 120.0) -> None:
         """Call before each action: raise if stopped, wait while paused.
 
-        * Stop (pill, menu bar, hotkey) -> :class:`OverlayStopped`.
-        * Pause (pill, menu bar, hotkey) or user take-over (real mouse or
+        * Stop (bar, menu, hotkey) -> :class:`OverlayStopped`.
+        * Pause (bar, menu, hotkey) or user take-over (real mouse or
           keyboard input while Dobby works) -> wait here until resumed, or the
           user has been idle for a moment (auto mode), for at most
           ``max_wait`` seconds.

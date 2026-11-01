@@ -1,7 +1,8 @@
 """Native checks of the overlay helper's controls on macOS (skipped elsewhere).
 
 Builds a real OverlayController (windows are created but no event loop runs)
-and drives the control bar, the clickable name tag and Turbo directly.
+and drives the control bar, its ▾ menu button, the optional clickable name
+tag and Turbo directly.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def make(tmp_path):
 
     def _make(**cfg):
         out = io.StringIO()
-        base = {"menu_bar": False, "bar_lock": str(tmp_path / "bar.lock")}
+        base = {"bar_lock": str(tmp_path / "bar.lock")}
         base.update(cfg)
         c = mac_helper.OverlayController(base, out=out, interactive=False)
         c._claim_bar()
@@ -41,6 +42,8 @@ def make(tmp_path):
             c.hotspot.close()
         if c.pill is not None:
             c.pill.close()
+        if c.status_item is not None:
+            AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(c.status_item)
         c.bar_owner.release()
 
 
@@ -269,7 +272,97 @@ def test_non_owner_helper_shows_awake(make):
     assert b.pill.mode == "awake" and b.pill.window.isVisible()
 
 
-# ----------------------------------------------- clickable tag (the ▾)
+# ------------------------------------------------- menu on the bar's ▾
+def test_no_menu_bar_icon_by_default(make):
+    c, _ = make()
+    assert c.bar_owner.owned and c.status_item is None
+
+
+def test_menu_bar_icon_when_enabled(make):
+    c, _ = make(menu_bar=True)
+    assert c.status_item is not None
+    assert c.status_item.menu().itemAtIndex_(0).title().startswith("Dobby: ")
+
+
+def _bar_in(c, mode):
+    if mode == "ready":
+        _asleep(c)
+    elif mode == "awake":
+        _asleep(c)
+        c.wake()
+    elif mode == "working":
+        c._mark_active()
+    else:
+        c._start_confirm(3, "Allow Dobby to quit?", 5)
+    assert c.pill.mode == mode
+
+
+@pytest.mark.parametrize("mode", ["ready", "awake", "working"])
+def test_bar_has_menu_button(make, mode):
+    c, _ = make()
+    _bar_in(c, mode)
+    b = c.pill.menu_btn
+    assert not b.isHidden() and b.superview() is c.pill.view
+    assert b.toolTip() == "Dobby menu"
+    f, hide = b.frame(), c.pill.hide_btn.frame()
+    # right end of the bar, after "–", and inside the (centred) bar
+    assert f.origin.x >= hide.origin.x + hide.size.width
+    assert f.origin.x + f.size.width <= c.pill.window.frame().size.width - 8
+
+
+def test_bar_menu_button_hidden_while_confirming(make):
+    c, _ = make()
+    _asleep(c)
+    w_ready = c.pill.window.frame().size.width
+    _bar_in(c, "confirm")
+    assert c.pill.menu_btn.isHidden() and c.pill.hide_btn.isHidden()
+    c.on_pill("secondary")
+    _asleep(c)
+    assert not c.pill.menu_btn.isHidden()
+    assert c.pill.window.frame().size.width == pytest.approx(w_ready)
+
+
+def test_bar_is_centred_with_menu_button(make):
+    from AppKit import NSScreen
+
+    c, _ = make()
+    _bar_in(c, "working")
+    vf, f = NSScreen.screens()[0].visibleFrame(), c.pill.window.frame()
+    assert f.origin.x + f.size.width / 2 == pytest.approx(vf.origin.x + vf.size.width / 2, abs=1.0)
+
+
+def test_bar_menu_button_opens_dobbys_menu(make):
+    c, _ = make()
+    opened = []
+    c._pop_up = lambda menu, view, loc: opened.append((menu, view, loc))  # no modal tracking
+    c.pill.menu_btn.performClick_(None)
+    assert len(opened) == 1
+    menu, view, loc = opened[0]
+    assert view is c.pill.view
+    titles = [menu.itemAtIndex_(i).title() for i in range(menu.numberOfItems())]
+    for want in ("Dobby: Idle", "Wake Dobby", "Recent steps", "Pause", "Stop", "Show overlay",
+                 "Show control bar (⌃⌥H)"):
+        assert want in titles
+    assert any(t.startswith("Turbo mode") for t in titles)
+    assert any("trail" in t.lower() for t in titles)
+    f = c.pill.menu_btn.frame()
+    assert loc[0] == pytest.approx(f.origin.x) and loc[1] < f.origin.y  # just under the ▾
+
+
+def test_tag_has_no_chevron_by_default(make):
+    c, _ = make()
+    assert c.hotspot is None
+    _show_pointer(c)
+    tag = c.panels[0].tag
+    assert tag.chev.opacity() == 0.0
+    idle_w = tag.width
+    c.intent_text, c.intent_until = "Click 'Run'", time.monotonic() + 5
+    c._refresh_tag()
+    assert tag.chev.opacity() == 1.0  # the › breadcrumb before the detail
+    assert tag.width > idle_w + 8
+
+
+# -------------------------------- clickable tag (the ▾, cfg "chip_menu")
 def _show_pointer(c, x=400.0, y=300.0):
     c.cursor = (x, y)
     c._set_pointer_visible(True)
@@ -277,7 +370,8 @@ def _show_pointer(c, x=400.0, y=300.0):
 
 
 def test_tag_is_clickable_where_it_is_drawn(make):
-    c, _ = make()
+    c, _ = make(chip_menu=True)
+    assert c.panels[0].tag.chev.opacity() == 1.0  # the ▾ hint is back
     _show_pointer(c)
     hs = c.hotspot
     assert hs.shown and hs.window.isVisible()
@@ -294,7 +388,7 @@ def test_tag_is_clickable_where_it_is_drawn(make):
 
 
 def test_tag_click_area_grows_with_step_text(make):
-    c, _ = make()
+    c, _ = make(chip_menu=True)
     _show_pointer(c)
     w0 = c.hotspot.rect[2]
     c.intent_text, c.intent_until = "Click 'Run Synthesis'", time.monotonic() + 5
@@ -303,7 +397,7 @@ def test_tag_click_area_grows_with_step_text(make):
 
 
 def test_tag_click_area_hidden_with_pointer_and_during_capture(make):
-    c, _ = make()
+    c, _ = make(chip_menu=True)
     _show_pointer(c)
     c.capture_hidden = True
     c._apply_alpha()

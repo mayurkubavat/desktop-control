@@ -231,6 +231,32 @@ def test_capsule_thinking_icon_widens_tag(draw):
     assert max(_nonwhite_columns(draw(state="thinking"), 33)) > max(_nonwhite_columns(draw(), 33))
 
 
+def _label_only_width(text="Dobby"):
+    from PIL import Image, ImageDraw
+
+    from dobby.overlay.annotate import _font
+
+    return 9 + ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(text, font=_font(12)) + 9
+
+
+def test_capsule_idle_has_no_chevron(draw):
+    img = draw()
+    left, w = 10 + 12, _label_only_width()
+    # the capsule (plus its 1px shadow) is exactly a label-only capsule wide
+    assert max(_nonwhite_columns(img, 22 + 11)) == pytest.approx(left + w + 1, abs=2)
+    # and its trailing pad holds no white chevron strokes
+    px = img.load()
+    for x in range(int(left + w - 9 + 3), int(left + w - 3)):
+        for y in range(22 + 5, 22 + 18):
+            assert min(px[x, y]) < 230, (x, y)
+
+
+def test_capsule_detail_has_breadcrumb_and_is_wider(draw):
+    idle = max(_nonwhite_columns(draw(), 33))
+    busy = max(_nonwhite_columns(draw(intent="Click Run"), 33))
+    assert busy > idle + 8 + 5 + 20  # › + gap + some detail text
+
+
 @pytest.mark.parametrize("risk,channel", [("ok", 2), ("caution", 0), ("danger", 0)])
 def test_capsule_colour_follows_risk(draw, risk, channel):
     r, g, b = draw(risk=risk).getpixel((26, 22 + 15))

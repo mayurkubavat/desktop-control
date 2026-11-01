@@ -8,25 +8,27 @@ when stdin closes, so it never outlives the Dobby server.
 
 What it shows:
 
-* the violet pointer with a capsule name tag ("Dobby ▾", widening to
-  "Dobby ▸ Click 'Run Synthesis'") that says what Dobby is about to do,
+* the violet pointer with a capsule name tag ("Dobby", widening to
+  "Dobby › Click 'Run Synthesis'") that says what Dobby is about to do,
   a box around the target element (found by an Accessibility hit test),
   click ripples and a numbered trail of recent clicks;
 * a breathing glow around the window being worked on, dimmed when covered;
 * a "looking" shimmer while Dobby reads the screen;
 * risk colours: violet (ok), amber (caution), red (danger);
-* Turbo mode (config, or the menu bar): risky steps are allowed without a
+* Turbo mode (config, or Dobby's menu): risky steps are allowed without a
   prompt and user input does not pause Dobby; only Stop / Pause do;
 * a control bar at the top of the screen that stays while Dobby runs
   ("Dobby is sleeping" / "working" / "paused", with Pause / Resume / Stop,
   or Allow / Deny for risky steps) and can be hidden with its "–" button,
-  Ctrl+Option+H or the menu (it comes back by itself when Dobby wakes up
+  Ctrl+Option+H or Dobby's menu (it comes back by itself when Dobby wakes up
   and starts working again); it never appears in screenshots, so it does not
   blink during Dobby's captures. When several Dobby servers run, one helper
-  (holding ~/.dobby/overlay/bar.lock) shows the idle bar and the menu bar
-  icon; the others show their bar only while they work;
-* a menu bar icon and, by clicking the name tag's ▾, the same menu (status,
-  recent steps, Pause / Stop, Turbo, show/hide toggles).
+  (holding ~/.dobby/overlay/bar.lock) shows the idle bar; the others show
+  their bar only while they work;
+* Dobby's menu (status, Wake / Sleep, recent steps, Pause / Stop, Turbo,
+  show/hide toggles), opened from the bar's ▾ button. Optional extras open
+  the same menu: a menu bar icon (``menu_bar``, off by default) and a
+  clickable ▾ on the name tag (``chip_menu``, off by default).
 
 It also watches for real user input while Dobby works (take-over) and the
 hotkeys Ctrl+Option+Esc (stop), Ctrl+Option+P (pause / resume) and
@@ -70,6 +72,7 @@ from AppKit import (
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSImage,
+    NSImageOnly,
     NSMenu,
     NSMenuItem,
     NSPanel,
@@ -148,9 +151,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # need not hide it and it never blinks). True: visible in recordings, but
     # it hides for a moment during each of Dobby's captures.
     "pill_in_recordings": False,
-    "menu_bar": True,
+    # Extra ways to open Dobby's menu besides the bar's ▾ button: a menu bar
+    # icon, and a ▾ on the name tag that opens the menu when clicked.
+    "menu_bar": False,
+    "chip_menu": False,
     # Turbo: no Allow/Deny prompts and no take-over pause; only Stop/Pause
-    # (pill, menu bar, hotkeys) halt Dobby. Risky steps still flash red.
+    # (bar, menu, hotkeys) halt Dobby. Risky steps still flash red.
     "turbo": False,
 }
 
@@ -287,6 +293,9 @@ class _Target(NSObject):
     def pillHide_(self, _sender):
         self.owner.set_pill_hidden(True)
 
+    def pillMenu_(self, _sender):
+        self.owner.on_pill_menu()
+
     def menuWake_(self, _sender):
         self.owner.wake()
 
@@ -329,7 +338,8 @@ class _HotspotView(NSView):
 
 
 class _ChipHotspot:
-    """Clickable window that follows the name tag, so its ▾ opens a menu.
+    """Clickable window that follows the name tag, so its ▾ opens a menu
+    (only with cfg "chip_menu"; by default the menu is on the bar's ▾).
 
     Dobby clicks at the pointer tip and the tag sits below-right of the tip,
     so this never catches Dobby's own clicks. Hidden from every capture.
@@ -439,37 +449,48 @@ def _text_width(text: str, font) -> float:
         return 6.6 * len(text)
 
 
-def _symbol_contents(name: str, scale: float):
-    """SF Symbol as white layer contents, or None when unavailable."""
+def _white_symbol(name: str, size: float = 10.0):
+    """SF Symbol as a white NSImage, or None when unavailable."""
     try:
         from AppKit import NSImageSymbolConfiguration
 
         img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
         if img is None:
             return None
-        cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_(10.0, 0.3)  # semibold
+        cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_(size, 0.3)  # semibold
         try:
             white = NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.whiteColor()])
             cfg = cfg.configurationByApplyingConfiguration_(white)
-        except Exception:  # noqa: BLE001 - macOS < 12: template image, tinted below
+        except Exception:  # noqa: BLE001 - macOS < 12: template image
             pass
-        img = img.imageWithSymbolConfiguration_(cfg) or img
+        return img.imageWithSymbolConfiguration_(cfg) or img
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _symbol_contents(name: str, scale: float):
+    """SF Symbol as white layer contents, or None when unavailable."""
+    img = _white_symbol(name)
+    if img is None:
+        return None
+    try:
         return img.layerContentsForContentsScale_(scale)
     except Exception:  # noqa: BLE001
         return None
 
 
 class _Chip:
-    """Capsule name tag: [state icon] Dobby ▾, widening to "Dobby ▸ step".
+    """Capsule name tag: [state icon] Dobby, widening to "Dobby › step".
 
     Gradient fill with a soft top highlight (an inlaid, glassy look), a thin
     light border and a faint shadow. The layers are click-through like the
-    rest of the overlay; a separate _ChipHotspot window over the tag makes a
-    click open Dobby's menu.
+    rest of the overlay. With menu_hint (cfg "chip_menu") the idle tag ends
+    in a ▾ and a separate _ChipHotspot window over it opens Dobby's menu.
     """
 
-    def __init__(self, parent, scale: float, rgb) -> None:
+    def __init__(self, parent, scale: float, rgb, menu_hint: bool = False) -> None:
         self.scale = scale
+        self.menu_hint = menu_hint
         self.font = NSFont.systemFontOfSize_weight_(_CHIP_FONT, 0.3)
         self.root = CALayer.layer()
         self.root.setContentsScale_(scale)
@@ -554,8 +575,10 @@ class _Chip:
         icon_w = 11.0 if (icon is not None or thinking) else 0.0
         lw = _text_width(label, self.font)
         dw = min(_text_width(detail, self.font), 300.0) if detail else 0.0
-        chev_w = 8.0
-        w = pad + (icon_w + gap if icon_w else 0) + lw + gap + chev_w + (gap + dw if detail else 0) + pad
+        # The › breadcrumb only separates a detail; ▾ only hints at a menu.
+        chev_w = 8.0 if (detail or self.menu_hint) else 0.0
+        w = (pad + (icon_w + gap if icon_w else 0) + lw + (gap + chev_w if chev_w else 0)
+             + (gap + dw if detail else 0) + pad)
         CATransaction.begin()
         if animate:
             CATransaction.setAnimationDuration_(0.28)
@@ -579,7 +602,7 @@ class _Chip:
         self.label.setFrame_(CGRectMake(cx, text_y, lw + 2, _CHIP_FONT * 1.3))
         cx += lw + gap
         self.chev.setFrame_(CGRectMake(cx, (h - 8) / 2, chev_w, 8))
-        cx += chev_w + gap
+        cx += (chev_w + gap) if chev_w else 0.0
         self.detail.setFrame_(CGRectMake(cx, text_y, dw + 2, _CHIP_FONT * 1.3))
         CATransaction.commit()
         CATransaction.begin()
@@ -589,12 +612,9 @@ class _Chip:
         self.detail.setOpacity_(1.0 if detail else 0.0)
         self.icon.setContents_(icon)
         self.icon.setOpacity_(1.0 if icon is not None else 0.0)
-        chev = self._chev_right if detail else self._chev_down
-        if chev is not None:
-            self.chev.setContents_(chev)
-        else:  # no SF Symbols: draw a small triangle instead
-            self.chev.setContents_(None)
-            self.chev.setBackgroundColor_(None)
+        chev = self._chev_right if detail else (self._chev_down if self.menu_hint else None)
+        self.chev.setContents_(chev)  # None: no chevron (or no SF Symbols)
+        self.chev.setOpacity_(1.0 if chev is not None else 0.0)
         CATransaction.commit()
         if thinking != (self._state == "thinking"):
             self.spin.setOpacity_(1.0 if thinking else 0.0)
@@ -680,7 +700,7 @@ class _Panel:
         arrow.setShadowOffset_((0, -1))
         pointer.addSublayer_(arrow)
 
-        tag = _Chip(pointer, self.scale, rgb)
+        tag = _Chip(pointer, self.scale, rgb, menu_hint=bool(cfg.get("chip_menu")))
         root.addSublayer_(pointer)
 
         self.window, self.view, self.root = win, view, root
@@ -738,10 +758,16 @@ class _Pill:
         self.primary = _PillButton.buttonWithTitle_target_action_("Pause", target, "pillPrimary:")
         self.secondary = _PillButton.buttonWithTitle_target_action_("Stop", target, "pillSecondary:")
         self.hide_btn = _PillButton.buttonWithTitle_target_action_("–", target, "pillHide:")
-        self.hide_btn.setToolTip_("Hide this bar (show it again from the menu bar or ⌃⌥H)")
-        for b in (self.primary, self.secondary, self.hide_btn):
+        self.hide_btn.setToolTip_("Hide this bar (⌃⌥H shows it again)")
+        self.menu_btn = _PillButton.buttonWithTitle_target_action_("", target, "pillMenu:")
+        self.menu_btn.setToolTip_("Dobby menu")
+        for b in (self.primary, self.secondary, self.hide_btn, self.menu_btn):
             b.setFont_(NSFont.systemFontOfSize_(12.0))
             view.addSubview_(b)
+        self.menu_glyph = _white_symbol("chevron.down")
+        if self.menu_glyph is not None:
+            self.menu_btn.setImage_(self.menu_glyph)
+            self.menu_btn.setImagePosition_(NSImageOnly)
         self.dot = CALayer.layer()
         view.layer().addSublayer_(self.dot)
         self.window, self.view = win, view
@@ -759,15 +785,19 @@ class _Pill:
         self.primary.set_label(primary)
         self.secondary.set_label(secondary)
         self.hide_btn.set_label("–")
-        self.primary.sizeToFit()
-        self.secondary.sizeToFit()
-        self.hide_btn.sizeToFit()
+        if self.menu_glyph is None:
+            self.menu_btn.set_label("▾")
+        for b in (self.primary, self.secondary, self.hide_btn, self.menu_btn):
+            b.sizeToFit()
         lw = self.label.frame().size.width
         pw, sw = self.primary.frame().size.width, self.secondary.frame().size.width
-        can_hide = mode != "confirm"  # a pending Allow/Deny must stay answerable
-        self.hide_btn.setHidden_(not can_hide)
-        hw = self.hide_btn.frame().size.width if can_hide else 0.0
-        w = 28 + lw + 14 + pw + 6 + sw + (4 + hw if can_hide else 0) + 12
+        # A pending Allow/Deny must stay answerable: no hiding, no menu.
+        extras = mode != "confirm"
+        self.hide_btn.setHidden_(not extras)
+        self.menu_btn.setHidden_(not extras)
+        hw = self.hide_btn.frame().size.width if extras else 0.0
+        mw = self.menu_btn.frame().size.width if extras else 0.0
+        w = 28 + lw + 14 + pw + 6 + sw + (4 + hw + 2 + mw if extras else 0) + 12
         self.dot.setFrame_(CGRectMake(14, self.H / 2 - 4, 8, 8))
         self.dot.setCornerRadius_(4)
         self.dot.setBackgroundColor_(_cg(rgb, dot_alpha))
@@ -776,8 +806,10 @@ class _Pill:
         x = 28 + lw + 14
         self.primary.setFrameOrigin_((x, (self.H - self.primary.frame().size.height) / 2))
         self.secondary.setFrameOrigin_((x + pw + 6, (self.H - self.secondary.frame().size.height) / 2))
-        if can_hide:
-            self.hide_btn.setFrameOrigin_((x + pw + 6 + sw + 4, (self.H - self.hide_btn.frame().size.height) / 2))
+        if extras:
+            hx = x + pw + 6 + sw + 4
+            self.hide_btn.setFrameOrigin_((hx, (self.H - self.hide_btn.frame().size.height) / 2))
+            self.menu_btn.setFrameOrigin_((hx + hw + 2, (self.H - self.menu_btn.frame().size.height) / 2))
         screens = NSScreen.screens() or []
         if screens:
             vf = screens[0].visibleFrame()
@@ -790,6 +822,11 @@ class _Pill:
     def hide(self) -> None:
         self.mode = "hidden"
         self._apply_visibility()
+
+    def menu_anchor(self) -> Tuple[float, float]:
+        """Where Dobby's menu opens: just under the ▾, in self.view coordinates."""
+        f = self.menu_btn.frame()
+        return (f.origin.x, f.origin.y - 2)
 
     def flash(self, rgb) -> None:
         """Wake-up: the dot pops (1 → 1.6 → 1) and the border flashes."""
@@ -900,7 +937,7 @@ class OverlayController:
         self.pill_user_hidden = False
         self.pointer_visible = False
         self.chip_menu_open = False
-        self.hotspot = _ChipHotspot(self.target) if self.cfg.get("chip_menu", True) else None
+        self.hotspot = _ChipHotspot(self.target) if self.cfg.get("chip_menu") else None
         self.bar_owner = _BarOwner(self.cfg.get("bar_lock", BAR_LOCK))
         self.bar_owner_retry = 0.0
         self.interactive = interactive
@@ -1017,10 +1054,21 @@ class OverlayController:
         menu = self._build_menu(self._status()[0])
         self.chip_menu_open = True
         try:
-            menu.popUpMenuPositioningItem_atLocation_inView_(None, (0, 0), view)
+            self._pop_up(menu, view, (0, 0))
         finally:
             self.chip_menu_open = False
             self._update_hotspot()
+
+    def on_pill_menu(self) -> None:
+        """The user clicked the bar's ▾: open Dobby's menu under it."""
+        if self.pill is None:
+            return
+        self._pop_up(self._build_menu(self._status()[0]), self.pill.view, self.pill.menu_anchor())
+
+    @staticmethod
+    def _pop_up(menu, view, location) -> None:
+        # Blocks in modal menu tracking until the menu closes.
+        menu.popUpMenuPositioningItem_atLocation_inView_(None, location, view)
 
     def _set_pointer_visible(self, visible: bool) -> None:
         self.pointer_visible = visible
@@ -1193,7 +1241,7 @@ class OverlayController:
         return (float(b.get("X", 0)), float(b.get("Y", 0)), float(b.get("Width", 0)), float(b.get("Height", 0)))
 
     def _claim_bar(self) -> None:
-        """Become the helper that shows the idle bar and the menu bar icon."""
+        """Become the helper that shows the idle bar (and menu bar icon, if on)."""
         if not self.bar_owner.try_acquire():
             return
         if self.cfg["menu_bar"] and self.status_item is None:
@@ -1505,7 +1553,7 @@ class OverlayController:
                 self.takeover = True
             self._refresh_pill()
 
-    # ------------------------------------------------- controls: menu bar
+    # ------------------------------------- controls: menu (bar ▾, menu bar)
     def _install_status_item(self) -> None:
         try:
             self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(-1.0)

@@ -128,28 +128,70 @@ def test_right_click_and_failsafe():
         hal.mouse_click(0, 0)
 
 
-def test_hotkey_sets_modifier_flags():
+def test_hotkey_presses_and_releases_modifiers():
     hal, q = _hal()
     hal.keyboard_hotkey(["cmd", "shift", "s"])
-    keys = [e for e in q.posted if e["kind"] == "key"]
-    assert [(e["code"], e["down"]) for e in keys] == [(KEYCODES["s"], True), (KEYCODES["s"], False)]
-    assert all(e["flags"] == 0x100000 | 0x20000 for e in keys)
+    keys = [(e["code"], e["down"], e["flags"]) for e in q.posted if e["kind"] == "key"]
+    cmd, shift, s = 0x100000, 0x20000, KEYCODES["s"]
+    assert keys == [
+        (55, True, cmd), (56, True, cmd | shift),
+        (s, True, cmd | shift), (s, False, cmd | shift),
+        (56, False, cmd), (55, False, 0),
+    ]
+
+
+def test_hotkey_releases_modifiers_on_error():
+    hal, q = _hal()
+    real = q.CGEventPost
+    calls = []
+
+    def flaky(tap, ev):
+        calls.append(ev)
+        if len(calls) == 2:  # the 's' key-down fails
+            raise RuntimeError("post failed")
+        real(tap, ev)
+
+    q.CGEventPost = flaky
+    with pytest.raises(RuntimeError):
+        hal.keyboard_hotkey(["cmd", "s"])
+    last = q.posted[-1]
+    assert (last["code"], last["down"], last["flags"]) == (55, False, 0)
+
+
+def test_every_event_is_tagged_as_dobby():
+    from dobby.hal.macos import DOBBY_EVENT_TAG
+    hal, q = _hal()
+    hal.keyboard_type("a")
+    hal.keyboard_hotkey(["cmd", "c"])
+    hal.mouse_click(300, 200)
+    assert q.posted and all(e.get("field_42") == DOBBY_EVENT_TAG for e in q.posted)
 
 
 def test_press_key_and_unknown_key():
     hal, q = _hal()
     hal.keyboard_press_key("Escape")
-    assert [e["code"] for e in q.posted] == [53, 53]
+    assert [(e["code"], e["flags"]) for e in q.posted] == [(53, 0), (53, 0)]
     with pytest.raises(ValueError):
         hal.keyboard_press_key("hyper")
 
 
-def test_type_text_uses_unicode_events():
+def test_type_text_uses_unicode_events_with_no_modifiers():
     hal, q = _hal()
     hal.keyboard_type("aé\n")
     uni = [e["unicode"] for e in q.posted if "unicode" in e]
     assert uni == ["a", "a", "é", "é"]
+    assert all(e["flags"] == 0 for e in q.posted if e["kind"] == "key")
     assert [e["code"] for e in q.posted if e["kind"] == "key" and "unicode" not in e] == [36, 36]
+
+
+def test_release_modifiers_and_private_source():
+    hal, q = _hal()
+    hal.release_modifiers()
+    assert sorted(e["code"] for e in q.posted) == [55, 56, 58, 59]
+    assert all(not e["down"] and e["flags"] == 0 for e in q.posted)
+    q2 = FakeQuartz()
+    q2.CGEventSourceCreate = lambda state: ("src", state)
+    assert MacHAL(quartz=q2)._src == ("src", -1)
 
 
 def test_list_windows_and_focus():

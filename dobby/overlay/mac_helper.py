@@ -123,6 +123,9 @@ from Quartz import (
 )
 
 from . import geometry, protocol
+
+_kCGEventSourceUserData = 42
+DOBBY_EVENT_TAG = 0x444F4242  # same value as dobby.hal.macos.DOBBY_EVENT_TAG
 from .barlock import BAR_LOCK, BarOwner as _BarOwner
 from .menu import bar_click, bar_view, label_click, menu_entries, status_of
 
@@ -1504,8 +1507,17 @@ class OverlayController:
         except Exception:  # noqa: BLE001
             return 0
 
+    def _event_tag(self, event) -> int:
+        try:
+            cg = event.CGEvent()
+            return int(CGEventGetIntegerValueField(cg, _kCGEventSourceUserData)) if cg is not None else 0
+        except Exception:  # noqa: BLE001
+            return 0
+
     def _on_global_event(self, event) -> None:
         try:
+            if self._event_tag(event) == DOBBY_EVENT_TAG:
+                return  # synthetic input from any Dobby process, not the person
             pid = self._event_pid(event)
             if pid and pid in (self.server_pid, os.getpid()):
                 return  # Dobby's own synthetic input

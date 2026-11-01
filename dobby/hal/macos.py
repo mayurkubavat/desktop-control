@@ -65,6 +65,12 @@ _kCGScrollEventUnitLine = 1
 _kCGWindowListOptionOnScreenOnly = 1
 _kCGWindowListExcludeDesktopElements = 16
 _kCGNullWindowID = 0
+_kCGEventSourceStatePrivate = -1
+_kCGEventSourceUserData = 42
+
+# Every event Dobby posts carries this in kCGEventSourceUserData, so the overlay
+# (any Dobby's) can tell its synthetic input from the person's.
+DOBBY_EVENT_TAG = 0x444F4242  # "DOBB"
 
 
 def _load_quartz():
@@ -107,6 +113,15 @@ class MacHAL(IDesktopHAL):
         self._capture = capture_fn or _screencapture
         self._is_wayland = False  # diagnostics compatibility
         self.display_server = "Quartz"
+        # A private event source: our key events never pick up modifier state from
+        # the real keyboard or from earlier synthetic chords (stuck Cmd).
+        self._src = None
+        try:
+            create = getattr(self.Q, "CGEventSourceCreate", None)
+            if create is not None:
+                self._src = create(_kCGEventSourceStatePrivate)
+        except Exception:  # noqa: BLE001
+            self._src = None
 
     # ------------------------------------------------------------ helpers
 
@@ -121,6 +136,10 @@ class MacHAL(IDesktopHAL):
             raise RuntimeError("VisionMCP Failsafe Triggered: Cursor moved to (0, 0). Aborting execution.")
 
     def _post(self, event) -> None:
+        try:
+            self.Q.CGEventSetIntegerValueField(event, _kCGEventSourceUserData, DOBBY_EVENT_TAG)
+        except Exception:  # noqa: BLE001
+            pass
         self.Q.CGEventPost(_kCGHIDEventTap, event)
 
     def _cooldown(self) -> None:
@@ -224,7 +243,8 @@ class MacHAL(IDesktopHAL):
                 self.keyboard_press_key("return")
                 continue
             for down in (True, False):
-                ev = self.Q.CGEventCreateKeyboardEvent(None, 0, down)
+                ev = self.Q.CGEventCreateKeyboardEvent(self._src, 0, down)
+                self.Q.CGEventSetFlags(ev, 0)  # plain text: never inherit Cmd/Ctrl/Alt
                 self.Q.CGEventKeyboardSetUnicodeString(ev, len(ch.encode("utf-16-le")) // 2, ch)
                 self._post(ev)
             time.sleep(delay_ms / 1000.0)
@@ -241,39 +261,57 @@ class MacHAL(IDesktopHAL):
         raise ValueError(f"Unknown key '{key}' for macOS HAL")
 
     def _key_event(self, code: int, down: bool, flags: int) -> None:
-        ev = self.Q.CGEventCreateKeyboardEvent(None, code, down)
-        if flags:
-            self.Q.CGEventSetFlags(ev, flags)
+        ev = self.Q.CGEventCreateKeyboardEvent(self._src, code, down)
+        self.Q.CGEventSetFlags(ev, flags)  # always explicit, 0 included
         self._post(ev)
+
+    def release_modifiers(self) -> None:
+        """Posts key-up for Cmd, Shift, Ctrl and Alt with no flags, clearing any stuck modifier."""
+        for code in MODIFIER_KEYCODES.values():
+            self._key_event(code, False, 0)
 
     def keyboard_press_key(self, key_name: str) -> None:
         code, flag = self._resolve(key_name)
         if code is None:
             code = MODIFIER_KEYCODES[flag]
-        self._key_event(code, True, 0)
+        self._key_event(code, True, flag)
         time.sleep(0.02)
         self._key_event(code, False, 0)
         self._cooldown()
 
     def keyboard_hotkey(self, keys: List[str]) -> None:
-        """Chord such as ['cmd', 's']. Note: 'ctrl' is Control, not Command, on macOS."""
-        flags = 0
+        """Chord such as ['cmd', 's']. Note: 'ctrl' is Control, not Command, on macOS.
+
+        Presses the modifier keys for real, then the keys, then releases everything in
+        reverse, ending with no modifier flags, so nothing stays held afterwards.
+        """
+        mods: List[int] = []
         codes: List[int] = []
         for k in keys:
             code, flag = self._resolve(k)
             if code is None:
-                flags |= flag
+                if flag not in mods:
+                    mods.append(flag)
             else:
                 codes.append(code)
-        if not codes:  # modifiers only
-            codes = [MODIFIER_KEYCODES[f] for f in MODIFIER_KEYCODES if flags & f][:1]
-        for c in codes:
-            self._key_event(c, True, flags)
-            time.sleep(0.01)
-        time.sleep(0.03)
-        for c in reversed(codes):
-            self._key_event(c, False, flags)
-            time.sleep(0.01)
+        flags = 0
+        try:
+            for f in mods:
+                flags |= f
+                self._key_event(MODIFIER_KEYCODES[f], True, flags)
+                time.sleep(0.01)
+            for c in codes:
+                self._key_event(c, True, flags)
+                time.sleep(0.01)
+            time.sleep(0.03)
+            for c in reversed(codes):
+                self._key_event(c, False, flags)
+                time.sleep(0.01)
+        finally:
+            for f in reversed(mods):
+                flags &= ~f
+                self._key_event(MODIFIER_KEYCODES[f], False, flags)
+                time.sleep(0.01)
         self._cooldown()
 
     # ------------------------------------------------------------ windows

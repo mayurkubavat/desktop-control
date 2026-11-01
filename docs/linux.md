@@ -62,8 +62,13 @@ On by default when `DISPLAY` is set (`DOBBY_OVERLAY=0` turns it off). Panels
 are click-through override-redirect windows; with a compositor they are
 translucent and clicks ripple, without one they are cut to shape. The overlay
 is unmapped for every capture, so screenshots, OCR and Gemma never see it.
-Ctrl+Alt+Esc stops Dobby, Ctrl+Alt+P pauses and resumes. Not yet drawn on
-Linux: the numbered step trail, the scan sweep and user take-over detection.
+The control bar sits at the top centre: "Dobby is sleeping" with Pause and
+Stop, "working" while Dobby acts, "paused", "stopped". Click the bar itself to
+wake Dobby (it shows it is ready for a task) or put it back to sleep.
+`DOBBY_OVERLAY_PILL=auto` shows it only while working, `off` hides it.
+Ctrl+Alt+Esc stops Dobby, Ctrl+Alt+P pauses and resumes. Not yet on Linux:
+the numbered step trail, the scan sweep, the tag menu and user take-over
+detection.
 
 ## Headless test rig
 

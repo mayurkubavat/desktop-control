@@ -313,7 +313,7 @@ def _near(px, rgb, tol=12):
 
 
 @pytest.fixture
-def overlay(hal):
+def overlay(hal, tmp_path):
     try:
         import gi
 
@@ -323,7 +323,7 @@ def overlay(hal):
         pytest.skip("GTK 3 (python3-gi, gir1.2-gtk-3.0) not installed")
     from dobby.overlay.client import OverlayClient
 
-    client = OverlayClient(config={"speed": 0}, log_path=None)
+    client = OverlayClient(config={"speed": 0, "bar_lock": str(tmp_path / "bar.lock")}, log_path=None)
     yield client
     client.close()
 
@@ -386,3 +386,69 @@ def test_overlay_confirm_allow_deny_and_timeout(hal, overlay):
         hal.mouse_click(btn.bbox.x + btn.bbox.width // 2, btn.bbox.y + btn.bbox.height // 2)
         t.join(timeout=5)
         assert result.get("ok") is expected
+
+
+def _bar_items(insp):
+    return insp.inspect_desktop(app_name_filter="Dobby Overlay", filter_interactable=False)
+
+
+def _bar_label(insp, words):
+    found = _wait_for(lambda: next((e for e in _bar_items(insp) if e.role == "label" and words in e.name), None))
+    if found is None:
+        return None
+    time.sleep(0.3)  # the bar re-centres after its text changes
+    return next((e for e in _bar_items(insp) if e.role == "label" and words in e.name), found)
+
+
+def _click(hal, el):
+    hal.mouse_click(el.bbox.x + min(8, el.bbox.width // 2), el.bbox.y + el.bbox.height // 2)
+
+
+def test_control_bar_sleep_wake_pause_stop(hal, overlay):
+    from dobby.perception.atspi import ATSPIInspector
+
+    insp = ATSPIInspector(hal=hal)
+    if not insp.is_available:
+        pytest.skip("AT-SPI unavailable")
+    overlay.start_async()
+    sleeping = _bar_label(insp, "Dobby is sleeping")
+    assert sleeping is not None, "idle control bar not shown"
+    assert sleeping.bbox.y < 60  # top of the screen
+
+    _click(hal, sleeping)  # click the bar: wake
+    assert _wait_for(lambda: overlay.awake, timeout=3)
+    awake = _bar_label(insp, "ready for a task")
+    assert awake is not None
+    _click(hal, awake)  # click again: back to sleep
+    assert _wait_for(lambda: not overlay.awake, timeout=3)
+
+    pause = _wait_for(lambda: next((e for e in _bar_items(insp) if e.name == "Pause"), None))
+    _click(hal, pause)
+    assert _wait_for(lambda: overlay._paused, timeout=3)
+    assert _bar_label(insp, "Dobby is paused") is not None
+    resume = next(e for e in _bar_items(insp) if e.name == "Resume")
+    _click(hal, resume)
+    assert _wait_for(lambda: not overlay._paused, timeout=3)
+
+    stop = _wait_for(lambda: next((e for e in _bar_items(insp) if e.name == "Stop"), None))
+    _click(hal, stop)
+    assert _bar_label(insp, "Dobby stopped") is not None
+    assert _wait_for(lambda: overlay._stop_requested, timeout=3)
+
+
+def test_control_bar_working_and_hidden_for_capture(hal, overlay):
+    from dobby.perception.atspi import ATSPIInspector
+
+    insp = ATSPIInspector(hal=hal)
+    if not insp.is_available:
+        pytest.skip("AT-SPI unavailable")
+    assert overlay.move(700, 500, verb="Click")
+    working = _bar_label(insp, "Dobby is working")
+    assert working is not None
+    b = working.bbox
+    before = hal.capture_screen().crop((b.x, b.y, b.x + b.width, b.y + b.height))
+    assert overlay.hide()
+    hidden = hal.capture_screen().crop((b.x, b.y, b.x + b.width, b.y + b.height))
+    assert overlay.show()
+    assert before.getextrema() != hidden.getextrema()
+    assert all(lo == hi for lo, hi in hidden.getextrema())  # plain background while hidden

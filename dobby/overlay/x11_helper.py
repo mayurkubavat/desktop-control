@@ -11,7 +11,12 @@ What it draws:
 * a capsule tag next to the pointer with the label, state and current intent;
 * a glow frame around the tracked window and a thinner box around the target
   element (from the AT-SPI hit test when a move asks for a probe);
-* an Allow / Deny window for ``confirm``.
+* an Allow / Deny window for ``confirm``;
+* the control bar at the top of the screen (same states as macOS, from
+  ``menu.bar_view``): "Dobby is sleeping" with Pause / Stop, "working",
+  "paused", "stopped"; click the bar itself to wake Dobby or put it back to
+  sleep. Only the helper holding ``~/.dobby/overlay/bar.lock`` shows the idle
+  bar.
 
 Every panel except the confirm window is an override-redirect popup with an
 empty input shape, so clicks go straight through. Without a compositor the
@@ -22,7 +27,7 @@ Controls: Ctrl+Alt+Esc sends ``stop``; Ctrl+Alt+P toggles ``pause`` /
 ``resume`` (global key grabs on the root window).
 
 Not ported from macOS yet: the numbered step trail, the scan sweep, the menu
-bar item and user take-over detection. Their ops are accepted and acked so the
+bar icon / tag menu and user take-over detection. Their ops are accepted and acked so the
 server behaves the same.
 """
 
@@ -44,6 +49,8 @@ import cairo  # noqa: E402
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from . import geometry, protocol  # noqa: E402
+from .barlock import BAR_LOCK, BarOwner  # noqa: E402
+from .menu import bar_click, bar_view, label_click  # noqa: E402
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "color": "#7C5CFF",
@@ -56,6 +63,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "track_hz": 5.0,
     "intent_ms": 1600,
     "turbo": False,
+    "active_secs": 8.0,   # "working" lasts this long after an action
+    "awake_secs": 120.0,  # woken from the bar: stays awake this long without a task
+    "pill": "always",     # control bar: "always", "auto" (only while working) or "off"
 }
 
 # Classic arrow, y down, tip at (0, 0) (same outline as the macOS helper).
@@ -172,6 +182,74 @@ class _Frame:
             e.hide()
 
 
+_BAR_CSS = b"""
+#dobby-bar { background-color: rgba(28, 28, 32, 0.92); border-radius: 14px; }
+#dobby-bar label { color: #ffffff; font-weight: bold; }
+#dobby-bar button { padding: 0 10px; min-height: 22px; }
+#dobby-bar button label { color: #1c1c20; }
+"""
+
+
+class _Bar:
+    """The control bar: clickable (not click-through), top centre of the screen."""
+
+    def __init__(self, on_label, on_button) -> None:
+        self.mode = "hidden"
+        self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.win.set_title(protocol.OVERLAY_WINDOW_TITLE)
+        self.win.set_name("dobby-bar")
+        self.win.set_accept_focus(False)
+        self.win.set_keep_above(True)
+        provider = Gtk.CssProvider()
+        provider.load_from_data(_BAR_CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        row = Gtk.Box(spacing=8, margin_start=12, margin_end=8, margin_top=4, margin_bottom=4)
+        self.dot = Gtk.Label(label="●")
+        self.text = Gtk.Label(label="")
+        click = Gtk.EventBox()
+        inner = Gtk.Box(spacing=6)
+        inner.pack_start(self.dot, False, False, 0)
+        inner.pack_start(self.text, False, False, 0)
+        click.add(inner)
+        click.connect("button-press-event", lambda *_: (on_label(), True)[1])
+        self.primary = Gtk.Button(label="Pause")
+        self.secondary = Gtk.Button(label="Stop")
+        self.primary.set_can_focus(False)
+        self.secondary.set_can_focus(False)
+        self.primary.connect("clicked", lambda *_: on_button("primary"))
+        self.secondary.connect("clicked", lambda *_: on_button("secondary"))
+        row.pack_start(click, True, True, 0)
+        row.pack_start(self.primary, False, False, 0)
+        row.pack_start(self.secondary, False, False, 0)
+        self.win.add(row)
+        self.visible = False
+
+    def _place(self) -> None:
+        screen = Gdk.Screen.get_default()
+        w, _h = self.win.get_preferred_size()[1].width, 0
+        self.win.move(max(0, (screen.get_width() - w) // 2), 8)
+
+    def show(self, mode: str, text: str, primary: str, secondary: str, rgb, dot_alpha: float = 1.0) -> None:
+        self.mode = mode
+        self.text.set_text(text)
+        self.primary.set_label(primary)
+        self.secondary.set_label(secondary)
+        r, g, b = (int(v * 255) for v in rgb)
+        self.dot.set_markup(f'<span foreground="#{r:02x}{g:02x}{b:02x}" alpha="{int(dot_alpha * 100)}%">●</span>')
+        self.visible = True
+        self.win.resize(1, 1)
+        self._place()  # centre for the new text before mapping, so it does not jump
+        self.win.show_all()
+
+    def hide(self, keep_mode: bool = False) -> None:
+        if not keep_mode:
+            self.mode = "hidden"
+        self.visible = False
+        self.win.hide()
+
+
 class X11Overlay:
     def __init__(self, cfg: Dict[str, Any], out=None) -> None:
         self.cfg = dict(DEFAULT_CONFIG)
@@ -194,6 +272,16 @@ class X11Overlay:
         self.track_wid: Optional[int] = None
         self.track_pid: Optional[int] = None
 
+        now = time.monotonic()
+        self.last_action = now - 10 * float(self.cfg["active_secs"])  # start asleep
+        self.awake_until = 0.0
+        self.stopped_until = 0.0
+        self.wake_pointer = False
+        self.bar_mode = str(self.cfg.get("pill", "always"))
+        self.bar_owner = BarOwner(self.cfg.get("bar_lock", BAR_LOCK))
+        self.bar_owner_retry = 0.0
+        self.bar = None if self.bar_mode == "off" else _Bar(self.on_bar_label, self.on_bar)
+
         self.pointer = _Panel(self.composited, 26, 28, painter=self._paint_pointer)
         self.tag = _Panel(self.composited, 120, 26, painter=self._paint_tag)
         self.ripple = _Panel(True, 48, 48, painter=self._paint_ripple) if self.composited else None
@@ -206,6 +294,9 @@ class X11Overlay:
         self._probe = None
         GLib.timeout_add(int(1000 / max(float(self.cfg["track_hz"]), 0.5)), self._track_tick)
         GLib.timeout_add(200, self._tag_tick)
+        GLib.timeout_add(250, self._bar_tick)
+        self._claim_bar()
+        self._refresh_bar()
 
     # ------------------------------------------------------------- output
     def _write(self, text: str) -> None:
@@ -330,7 +421,11 @@ class X11Overlay:
                 p.hide()
             self.glow.hide()
             self.box.hide()
+            if self.bar is not None and self.capture_hidden:
+                self.bar.hide(keep_mode=True)  # never in screenshots
             return
+        if self.bar is not None and not self.bar.visible:
+            self._refresh_bar()
         if self.cursor is not None:
             self._place_pointer(self.cursor)
         if self.glow.rect is not None:
@@ -450,6 +545,141 @@ class X11Overlay:
         b = hit["bbox"]
         return hit.get("name") or "", (b["x"], b["y"], b["width"], b["height"])
 
+    # ---------------------------------------------------------- control bar
+    def _working(self) -> bool:
+        return time.monotonic() - self.last_action <= float(self.cfg["active_secs"])
+
+    def _awake(self) -> bool:
+        return bool(self.awake_until) and time.monotonic() < self.awake_until
+
+    def _claim_bar(self) -> None:
+        if self.bar is not None and not self.bar_owner.owned:
+            self.bar_owner.try_acquire()
+
+    def _refresh_bar(self) -> None:
+        if self.bar is None:
+            return
+        if self.capture_hidden:
+            return
+        if self.bar.mode == "stopped" and time.monotonic() < self.stopped_until:
+            return
+        view = bar_view(
+            paused=self.paused, takeover=False, takeover_resume="auto",
+            working=self._working(), turbo=bool(self.cfg.get("turbo")),
+            current_mode=self.bar.mode, bar_mode=self.bar_mode,
+            owner=self.bar_owner.owned, awake=self._awake(),
+        )
+        if view is None:
+            self.bar.hide()
+            return
+        mode, text, primary, secondary, color, dot_alpha = view
+        rgb = {"ok": _rgb(self.cfg["color"]), "caution": _rgb(self.cfg["caution_color"]),
+               "danger": _rgb(self.cfg["danger_color"])}.get(color) or self._color()
+        self.bar.show(mode, text, primary, secondary, rgb, dot_alpha=dot_alpha)
+
+    def _bar_tick(self) -> bool:
+        now = time.monotonic()
+        if self.bar is not None and not self.bar_owner.owned and now >= self.bar_owner_retry:
+            self.bar_owner_retry = now + 2.0
+            if self.bar_owner.try_acquire():
+                self._refresh_bar()
+        if self.awake_until and now >= self.awake_until:
+            self.sleep()
+        if self.bar is not None:
+            if self.bar.mode == "working" and not self._working():
+                self._refresh_bar()
+            elif self.bar.mode == "stopped" and now >= self.stopped_until:
+                self.bar.mode = "ready"
+                self._refresh_bar()
+        return True
+
+    def _mark_active(self) -> None:
+        self.last_action = time.monotonic()
+        self.wake_pointer = False  # Dobby drives the pointer now
+        if self.awake_until:
+            self._end_awake()
+        if self.bar is not None and self.bar.mode in ("hidden", "ready", "awake"):
+            self._refresh_bar()
+
+    def _end_awake(self) -> None:
+        self.awake_until = 0.0
+        self.send_event("sleep")
+
+    def on_bar_label(self) -> None:
+        if self.bar is None:
+            return
+        action = label_click(self.bar.mode)
+        if action == "wake":
+            self.wake()
+        elif action == "sleep":
+            self.sleep()
+
+    def wake(self) -> None:
+        self.awake_until = time.monotonic() + max(5.0, float(self.cfg["awake_secs"]))
+        self.send_event("wake")
+        self._refresh_bar()
+        if self.cursor is None:
+            screen = Gdk.Screen.get_default()
+            self._place_pointer((screen.get_width() / 2.0, 110.0))
+            self.wake_pointer = True
+        self.state = "idle"
+        self._layout_tag()
+
+    def sleep(self) -> None:
+        if not self.awake_until:
+            return
+        self._end_awake()
+        if self.wake_pointer:
+            self.wake_pointer = False
+            self.pointer.hide()
+            self.tag.hide()
+            self.cursor = None
+        self._refresh_bar()
+
+    def on_bar(self, which: str) -> None:
+        if self.bar is None:
+            return
+        action = bar_click(self.bar.mode, which)
+        if action in ("hide", "dismiss"):
+            self.bar.mode = "ready"
+            if action == "hide":
+                self.bar.hide()
+            else:
+                self._refresh_bar()
+        elif action == "stop":
+            self.request_stop()
+        elif action == "pause":
+            self.set_paused(True)
+        elif action == "resume":
+            self.resume()
+
+    def set_paused(self, paused: bool) -> None:
+        if paused == self.paused:
+            return
+        self.paused = paused
+        self.send_event("pause" if paused else "resume")
+        self._refresh_bar()
+        self._layout_tag()
+
+    def resume(self) -> None:
+        if self.paused:
+            self.set_paused(False)
+        self._mark_active()
+        self._refresh_bar()
+
+    def request_stop(self) -> None:
+        if self.pending_confirm is not None:
+            self._answer_confirm(False)
+        self.paused = False
+        if self.awake_until:
+            self.sleep()
+        self.send_event("stop")
+        self.send_event("user_idle")
+        self._set_intent("Stopped", 1500)
+        if self.bar is not None:
+            self.bar.show("stopped", "Dobby stopped", "OK", "Hide", _rgb(self.cfg["danger_color"]))
+            self.stopped_until = time.monotonic() + 2.0
+
     # ------------------------------------------------------------- confirm
     def _start_confirm(self, msg_id: Any, text: str, secs: float) -> None:
         if self.cfg.get("turbo"):
@@ -509,6 +739,7 @@ class X11Overlay:
     def handle(self, msg: Dict[str, Any]) -> None:
         op, msg_id = msg["op"], msg.get("id")
         if op == "cursor.move":
+            self._mark_active()
             target = (float(msg["x"]), float(msg["y"]))
             verb = msg.get("verb")
             if msg.get("probe"):
@@ -534,11 +765,14 @@ class X11Overlay:
                 self.state = "idle"
             self._glide(target, self._duration(ms), msg_id)
         elif op == "cursor.click":
+            self._mark_active()
             self._ripple_at()
             GLib.timeout_add(500, lambda: (self.box.place(None), False)[1])
             self.ack(msg_id)
         elif op == "cursor.state":
             self.state = msg["state"]
+            if self.state in ("typing", "thinking"):
+                self._mark_active()
             self._layout_tag()
             self.ack(msg_id)
         elif op == "cursor.hide":
@@ -547,6 +781,7 @@ class X11Overlay:
             self.cursor = None
             self.ack(msg_id)
         elif op == "intent":
+            self._mark_active()
             self._set_intent(msg["text"], msg.get("ms"))
             self.ack(msg_id)
         elif op == "target.box":
@@ -565,6 +800,7 @@ class X11Overlay:
         elif op in ("scan", "trail.clear"):
             self.ack(msg_id)  # not drawn on Linux yet
         elif op == "confirm":
+            self._mark_active()
             self._start_confirm(msg_id, msg["text"], float(msg.get("secs", 30.0)))
         elif op == "confirm.cancel":
             self._answer_confirm(False)
@@ -642,19 +878,18 @@ class X11Overlay:
 
     def _on_hotkey(self, which: str) -> bool:
         if which == "stop":
-            self.paused = False
-            self.send_event("stop")
-            self.send_event("user_idle")
+            self.request_stop()
+        elif self.paused:
+            self.resume()
         else:
-            self.paused = not self.paused
-            self.send_event("pause" if self.paused else "resume")
-        self._layout_tag()
+            self.set_paused(True)
         return False
 
     # ---------------------------------------------------------------- life
     def quit(self) -> bool:
         if self.pending_confirm is not None:
             self._answer_confirm(False)
+        self.bar_owner.release()
         Gtk.main_quit()
         return False
 

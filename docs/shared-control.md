@@ -54,5 +54,3 @@ after 10 minutes paused.
 | `DOBBY_CONTROL_HOLD_CAP` | 120 | Upper bound for `hold_control` |
 | `DOBBY_CONTROL_PREEMPT` | off | Priority preemption at step boundaries |
 | `DOBBY_CONTROL_DIR` | `~/.dobby/control` | Lease and registry location |
-
-Design notes: https://claude.ai/artifact/ATCH4TFTExyTnDihHCHCEj

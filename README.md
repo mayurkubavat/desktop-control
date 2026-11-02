@@ -1,266 +1,285 @@
 # Dobby
 
-A Model Context Protocol (MCP) server for desktop automation, screen perception, and window management on Linux, Windows and macOS.
+Dobby lets an AI assistant use your desktop the way you do: it looks at the
+screen, finds buttons and fields, clicks, types and checks that each step
+worked. It runs as an [MCP](https://modelcontextprotocol.io) server, so any
+MCP client (Claude Code, Claude Desktop, Antigravity, Cursor and others) can
+drive it.
 
-`dobby` lets AI coding assistants and autonomous agents (such as Antigravity, Claude, and Gemini) interact with graphical desktop applications. It provides tools for screen capture, mouse and keyboard control, UI element detection, window management, and executing multi-step action scripts.
+Dobby tries hard not to send screenshots to the cloud model. It reads the
+operating system's accessibility tree and local OCR first, and asks a small
+local model (Gemma 3 through Ollama by default) for yes/no checks and picks.
+A screenshot is the last resort, not the first step.
 
----
-
-## Features
-
-- **Screen Perception**: Capture full screens, specific application windows, or named sub-panes (e.g. waveform viewers, address bars). Optional Set-of-Marks (SoM) visual badge overlays.
-- **Input Automation**: Mouse clicking, dragging, scrolling, text typing with cadence, single key presses, and multi-key shortcuts.
-- **UI Element Detection**: Finds interactive elements using OS accessibility trees (AT-SPI2 / D-Bus), a lightweight local ONNX detector (sub-10ms), or visual template matching.
-- **Self-Healing Locator Cache**: Remembers element locations across runs, verifies them with visual hashing (<0.5ms), and automatically adjusts for window movement or slight layout drift.
-- **Local Trajectory Execution**: Batches multi-step sequences (`execute_trajectory`) locally at native OS speeds without needing model round-trips for every action.
-- **Application Plugins**: Pre-configured support for dense applications such as AMD Vivado 2025.1 and Google Chrome, with extensible interfaces for custom tools.
-- **GUI-to-Script Crystallization**: Correlates physical UI interactions with application journals (e.g. Vivado `.jou`) to compile repetitive workflows into parameterized scripts.
-- **Event-Driven Quiescence**: Uses X11 damage events (`XDamage`) to wait for screen rendering to settle before taking action, avoiding fixed sleep timers.
+Works on **macOS** and **Linux (X11 / XWayland)**. Windows input works;
+Windows window listing is not finished yet.
 
 ---
 
-## Installation
+## What you get
 
-### Prerequisites
+- **See the screen cheaply.** Accessibility tree (macOS AX, Linux AT-SPI),
+  local OCR (Apple Vision or RapidOCR), a small icon detector, and a numbered
+  "screen state" the AI can pick from by number.
+- **Act and verify.** Click, type, scroll, hotkeys, window focus. After each
+  action Dobby waits for the screen to settle and can check the result with
+  OCR or a local yes/no question (`ask_screen`) instead of a screenshot.
+- **Local models, your choice.** Every model job has a role you can point at
+  any Ollama model.
+- **An on-screen overlay.** A second cursor, a glow around the window Dobby
+  is working in, and a control bar with Pause and Stop, so you always see
+  what it is doing and can take over.
+- **Shared control.** Two AI clients can share one desktop and take turns.
+- **App know-how.** Plugins and skills for Chrome, AMD Vivado and Synopsys
+  Verdi; recordable, replayable sessions ("cassettes") for testing.
 
-- **Python**: 3.10 or higher
-- **Linux**: an X11 or XWayland session (native Wayland is not supported yet); see [docs/linux.md](docs/linux.md)
-- **Windows**: Windows 10/11 (supported via Win32 / UIA HAL)
+---
 
-### Setup
+## Install
+
+You need Python 3.10 or newer and git.
 
 ```bash
-# Clone the repository
-git clone https://github.com/<your-org>/Dobby.git
+git clone https://github.com/mayurkubavat/Dobby.git
 cd Dobby
-
-# Create and activate virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install in editable mode
-pip install -e .
-
-# Optional local OCR lane (RapidOCR on Linux/Windows, Apple Vision on macOS)
-pip install -e ".[ocr]"
-
-# macOS backend (Quartz capture/input, Accessibility tree)
-pip install -e ".[macos,ocr]"
-
-# Linux X11 backend (system packages first: see docs/linux.md)
-pip install -e ".[linux,ocr]"
+source .venv/bin/activate
 ```
 
-On macOS, grant the app that launches the server (Terminal, Claude, Antigravity)
-**Accessibility** and **Screen Recording** in System Settings > Privacy & Security.
-Coordinates are logical points; Retina captures are resized to points. Shortcuts use
-`cmd` for Command (`hotkey("cmd+s")`); `ctrl` is the Control key.
+### macOS
 
-Read-only smoke test of the local stack (HAL, accessibility, OCR, Gemma):
+```bash
+pip install -e ".[macos,ocr]"
+```
+
+Then open **System Settings > Privacy & Security** and give the app that
+starts Dobby (Terminal, your IDE, Claude Desktop, Antigravity...) both
+**Accessibility** and **Screen Recording**. Without them Dobby can neither
+read the screen nor click.
+
+### Linux (X11 or XWayland)
+
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-atspi-2.0 gir1.2-gtk-3.0 \
+    at-spi2-core x11-utils
+python3 -m venv --system-site-packages .venv   # recreate the venv: PyGObject comes from the system
+source .venv/bin/activate
+pip install -e ".[linux,ocr]"
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+```
+
+Native Wayland apps are not visible to Dobby yet. On a GNOME or KDE Wayland
+desktop, log in to an "on Xorg" session or run apps with `GDK_BACKEND=x11`.
+Chrome, VS Code and other Electron apps started before Dobby need a restart
+to expose their accessibility tree. Details: [docs/linux.md](docs/linux.md).
+
+### Check it
 
 ```bash
 python scripts/smoke_local.py
 ```
 
-To run the test suite:
+This only reads: it reports screen capture, accessibility, OCR and the local
+model, with timings. It never clicks or types.
+
+---
+
+## Local models (Ollama)
+
+Dobby's checks run on a local model, so they cost no cloud tokens.
+
+1. Install [Ollama](https://ollama.com) and start it.
+2. Pull the default model:
+
+   ```bash
+   ollama pull gemma3:4b
+   ```
+
+That is all you need. Dobby talks to Ollama at `http://127.0.0.1:11434`.
+
+### Model roles
+
+Each kind of job has its own role, and each role can use a different model.
+All four default to `gemma3:4b`.
+
+| Role | What it does |
+| --- | --- |
+| `text` | Picks the right element from the numbered screen state |
+| `vision` | Answers yes/no questions about a part of the screen |
+| `visual_pick` | Picks a lettered box on a screenshot |
+| `triage` | Reads dialog text and decides if it is safe to dismiss |
+
+To change a role, use any of these (the first one found wins):
+
+1. An environment variable in your MCP client config:
+   `DOBBY_MODEL_VISION=qwen2.5vl:7b`
+2. At runtime, ask the AI to call `set_model_role("visual_pick", "qwen2.5vl:7b")`
+3. A file at `~/.dobby/models.json`, re-read when it changes:
+
+   ```json
+   { "vision": "qwen2.5vl:7b", "visual_pick": "qwen3-vl:8b" }
+   ```
+
+Dobby never downloads models; `set_model_role` refuses a model you have not
+pulled. To compare candidates on the same test cases:
+
+```bash
+python scripts/bench_models.py --models gemma3:4b,qwen2.5vl:7b
+```
+
+It reports accuracy, confident mistakes and whether the model admits "none"
+when the target is not there.
+
+---
+
+## Connect your AI client
+
+Every client starts its own Dobby. In each example, replace
+`/path/to/Dobby` with where you cloned it.
+
+### Claude Code
+
+```bash
+claude mcp add --scope user Dobby -- /path/to/Dobby/.venv/bin/dobby
+```
+
+Optional: install the Dobby skills, which teach the agent to read the screen
+cheaply and verify each step:
+
+```
+/plugin marketplace add /path/to/Dobby
+/plugin install dobby@dobby
+```
+
+### Claude Desktop
+
+Edit the config file and restart Claude Desktop:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "Dobby": {
+      "command": "/path/to/Dobby/.venv/bin/dobby"
+    }
+  }
+}
+```
+
+### Antigravity
+
+Open the MCP settings in Antigravity (or edit
+`~/.gemini/antigravity/mcp_config.json`) and add:
+
+```json
+{
+  "mcpServers": {
+    "Dobby": {
+      "command": "/path/to/Dobby/.venv/bin/dobby"
+    }
+  }
+}
+```
+
+### Any other MCP client
+
+Run `/path/to/Dobby/.venv/bin/dobby` as a stdio server. On Linux, add
+`"env": { "DISPLAY": ":0" }` if the client does not pass your display.
+
+### Fewer tools, smaller prompts
+
+Dobby has 56 tools, grouped into toolsets. It starts with only the core
+tools (`minimal_computer_use`) to keep the AI's prompt small. The AI can
+switch with `manage_toolsets`, for example to `full_developer` (window
+management, plugins, recording, advanced vision) or `eda_automation` (adds
+Vivado and Verdi).
+
+---
+
+## The overlay
+
+When Dobby acts you see it:
+
+- a violet **agent cursor** that glides to each target and ripples on click,
+  with a tag saying what it is about to do ("Click 'Run Synthesis'");
+- a soft **glow** around the window it is working in;
+- a **control bar** at the top of the screen: "Dobby is sleeping" when idle,
+  the current step and a timer while working, with **Pause** and **Stop**.
+
+Risky steps (quit, close, delete, log out) turn amber or red and ask you to
+**Allow** or **Deny** first. If you move the mouse or type, Dobby pauses and
+looks again before its next step.
+
+| Shortcut | macOS | Linux |
+| --- | --- | --- |
+| Stop | Ctrl+Opt+Esc | Ctrl+Alt+Esc |
+| Pause / resume | Ctrl+Opt+P | Ctrl+Alt+P |
+| Hide / show the bar | Ctrl+Opt+H | |
+
+**Keep Dobby on call.** Ask the AI to call `wait_for_wake` when it is done.
+The bar then says "click to wake"; clicking it hands control back to the AI.
+
+The overlay is hidden from Dobby's own screenshots, so the model never sees
+it. Settings go in the client's `env`:
+
+| Variable | Effect |
+| --- | --- |
+| `DOBBY_OVERLAY=0` | Turn the overlay off |
+| `DOBBY_OVERLAY_STYLE=classic` | Use the older, larger look |
+| `DOBBY_OVERLAY_TURBO=1` | No Allow/Deny prompts and no pause on take-over (Stop and Pause still work) |
+| `DOBBY_OVERLAY_COLOR=#7c5cff` | Fix the colour (otherwise each Dobby gets its own) |
+| `DOBBY_OVERLAY_CAPTURE_VISIBLE=0` | Hide the overlay from your screen recordings too |
+
+On Linux the trail of recent clicks, the scan sweep and take-over detection
+are not drawn yet.
+
+---
+
+## Two AIs, one desktop
+
+If you run Dobby from two clients at once (say Claude Code and Antigravity),
+they take turns instead of fighting over the mouse. A whole tool call is one
+turn, so nobody cuts in between a click and the typing after it. Control
+passes to the waiting agent when the holder releases it, after 10 seconds
+idle, or after a 60 second slice.
+
+When more than one Dobby runs, the **▾** menu on the control bar lists them,
+so you can pause or stop each one. You always outrank both: Pause, Stop and
+taking over the mouse still work.
+
+Useful settings, per client:
+
+| Variable | Effect |
+| --- | --- |
+| `DOBBY_AGENT_NAME=Antigravity` | Name shown on the overlay and to the other agent |
+| `DOBBY_AGENT_PRIORITY=1` | Higher goes first when both are waiting |
+| `DOBBY_CONTROL=0` | Turn shared control off |
+
+More: [docs/shared-control.md](docs/shared-control.md).
+
+---
+
+## Learn more
+
+- [docs/tools.md](docs/tools.md): every tool with its parameters
+- [docs/architecture.md](docs/architecture.md): how the pieces fit
+- [docs/linux.md](docs/linux.md): Linux details, XWayland, a headless test rig
+- [docs/shared-control.md](docs/shared-control.md): the control lease in depth
+- [plugins/dobby/README.md](plugins/dobby/README.md): the agent skills
+
+## Development
 
 ```bash
 pip install -e ".[dev]"
 pytest tests/
+pytest -m replay          # replay recorded sessions offline
 ```
 
----
-
-## MCP Client Configuration
-
-Add `dobby` to your MCP client configuration file:
-
-### Claude Desktop (`~/.config/Claude/claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "Dobby": {
-      "command": "/path/to/Dobby/.venv/bin/dobby",
-      "env": {
-        "DISPLAY": ":0"
-      }
-    }
-  }
-}
-```
-
-### Antigravity / Gemini CLI (`~/.gemini/antigravity-cli/mcp_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "Dobby": {
-      "command": "/path/to/Dobby/.venv/bin/dobby",
-      "env": {
-        "DISPLAY": ":20"
-      }
-    }
-  }
-}
-```
-
----
-
-## Available Tools (40 Tools)
-
-### Screen Perception & Window Management
-| Tool | Description |
-| :--- | :--- |
-| `take_screenshot` | Captures the screen with optional Set-of-Marks labels and window clipping. |
-| `capture_window` | Captures only the target or active window, reducing image size. |
-| `capture_pane` | Captures a named functional zone (e.g., `waveform_canvas`, `tcl_console`). |
-| `list_windows` | Lists open desktop windows with IDs, titles, and bounding boxes. |
-| `get_active_window` | Returns information about the currently focused window. |
-| `focus_window` | Brings a window to the foreground by ID or title. |
-| `wait_for_ui_change` | Waits until a visual change occurs on screen. |
-| `ask_screen` | Answers a yes/no question about the screen with local Gemma; returns text only, no image tokens. |
-
-### Mouse & Keyboard Input
-| Tool | Description |
-| :--- | :--- |
-| `click` | Clicks at coordinates, on a mark ID, or by element label. |
-| `click_and_type` | Focuses an element, clears existing text, types new text, and submits. |
-| `type_text` | Types text into the focused element with adjustable typing speed. |
-| `press_key` | Presses and releases a single key (e.g., `enter`, `escape`, `tab`, `f5`). |
-| `hotkey` | Sends a key combination (e.g., `ctrl+c`, `alt+tab`, `ctrl+f5`). |
-| `move_cursor` | Moves the mouse pointer to coordinates. |
-| `drag_and_drop` | Drags the mouse from start coordinates to end coordinates. |
-| `scroll` | Scrolls the mouse wheel horizontally or vertically. |
-| `scroll_until_visible` | Scrolls until a target element or text becomes visible. |
-
-### UI Element Grounding & vDOM
-| Tool | Description |
-| :--- | :--- |
-| `find_element` | Finds an element's screen coordinates by text label or accessible role. |
-| `find_and_click` | Finds an element by label and clicks it in a single step. |
-| `get_accessibility_tree` | Retrieves the accessibility tree (AT-SPI2) for open applications. |
-| `capture_vdom` | Fuses accessibility and visual elements into an indexed virtual DOM; `label_with_gemma` names unlabeled visual nodes with local Gemma. |
-| `read_screen_text` | Reads on-screen text with local OCR (Apple Vision on macOS, RapidOCR on Linux/Windows); returns lines and click points, no image. |
-| `find_visual_element` | Finds an unlabeled element by description: detector boxes, local Gemma picks one by number, click point from the detector. |
-| `query_vdom` | Queries the virtual DOM using CSS-style selectors (e.g., `push_button`, `tab_item`). |
-
-### Trajectories, Macros & Script Crystallization
-| Tool | Description |
-| :--- | :--- |
-| `execute_trajectory` | Executes a declarative multi-step action sequence locally at native speed. |
-| `start_skill_recording` | Starts recording physical actions alongside application journal streams. |
-| `stop_skill_recording` | Stops recording and correlates actions with journal commands. |
-| `crystallize_skill` | Compiles recorded interactions into a parameterized script template. |
-| `execute_crystallized_skill` | Executes a saved parameterized script directly through the application CLI. |
-| `list_crystallized_skills` | Lists all saved crystallized skills. |
-| `delete_crystallized_skill` | Deletes a saved skill. |
-| `start_cassette_recording` | Records each input action plus AX, OCR and window state as a replayable cassette. |
-| `stop_cassette_recording` | Writes the cassette to `~/.dobby/cassettes/<name>/index.json`. |
-
-### Plugins & Utilities
-| Tool | Description |
-| :--- | :--- |
-| `list_plugins` | Lists available application plugins (e.g., Vivado, Chrome). |
-| `list_plugin_features` | Lists capabilities and sub-panes for a specific plugin. |
-| `invoke_plugin_feature` | Runs a named plugin action (e.g., `vivado.zoom_fit`, `vivado.run_for`). |
-| `dismiss_obstructions` | Dismisses modal popups, update prompts, and screensavers. |
-| `resolve_modal_dialog` | Classifies and resolves confirmation or alert dialogs. |
-| `manage_cache` | Inspects, verifies, or clears the self-healing locator cache. |
-| `configure_vision` | Changes runtime settings (grounding strategy, cache toggles). |
-| `get_vision_diagnostics` | Returns system diagnostics, screen resolution, and active window. |
-| `run_terminal_command` | Executes a shell command and returns output and exit code. |
-
----
-
-## Directory Structure
-
-```
-dobby/
-├── dobby/             # Main Python package
-│   ├── hal/                # Hardware Abstraction Layer (Linux X11/Wayland, Windows)
-│   ├── perception/         # Screen capture, AT-SPI2, Set-of-Marks, token optimizer
-│   ├── vdom/               # Fast ONNX detector, virtual DOM fusion, layout solver
-│   ├── agent_loop/         # Controller, action cache, obstruction handler, trajectory engine
-│   ├── crystallization/    # GUI-to-script compiler and skill registry
-│   ├── plugins/            # Application plugins (Vivado, Chrome, base plugin)
-│   ├── models/             # Bundled Fast-Path ONNX UI detector (159 KB)
-│   ├── server.py           # FastMCP server and tool registrations
-│   ├── config.py           # Settings and environment variable handling
-│   └── types.py            # Pydantic data models and schemas
-│
-├── docs/                   # Documentation and runbooks
-│   ├── setup.md            # Installation and client configuration guide
-│   ├── tools.md            # Detailed tool reference with parameters and examples
-│   ├── architecture.md     # System architecture and design principles
-│   └── plugins/            # Plugin documentation (Vivado, custom plugins)
-│
-├── examples/               # Demonstrations and example scripts
-│   ├── live_trajectory_vivado.py  # End-to-end Vivado simulation trajectory
-│   └── dashboard.html             # Test fixture for browser interactions
-│
-├── tests/                  # Test suite (89 unit and integration tests)
-├── pyproject.toml          # Build configuration and dependencies
-├── requirements.txt        # Pinned dependencies
-├── LICENSE                 # License file
-└── README.md
-```
-
----
-
-## Testing
-
-Run the full test suite with `pytest`:
-
-```bash
-.venv/bin/pytest tests/
-```
-
-The tests cover HAL window management, quiescence monitoring, grounding strategies, modal triage, crystallization, self-healing cache, vDOM layout solvers, and trajectory execution.
-
-Recorded cassettes in `tests/cassettes/` replay offline and check their `expect.json`:
-
-```bash
-.venv/bin/pytest -m replay
-.venv/bin/python scripts/replay_cassette.py tests/cassettes/example_click
-```
-
-Record new ones from a live session with `start_cassette_recording` / `stop_cassette_recording` (toolset `skills`); see `tests/cassettes/README.md`.
-
----
+The test suite never sends real mouse or keyboard input unless you set
+`DOBBY_LIVE_DESKTOP_TESTS=1`.
 
 ## License
 
-This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
-
-## Local models (plug and play)
-
-Dobby works with any model served by Ollama. Each job has a role with its own model:
-`text` (choices over the text screen state), `vision` (yes/no on crops), `visual_pick`
-(lettered boxes on a screenshot) and `triage` (dialog text). All default to `gemma3:4b`.
-
-Swap a role without code changes, first match wins:
-
-1. `DOBBY_MODEL_<ROLE>=qwen2.5vl:7b` in the MCP client's env
-2. `set_model_role("visual_pick", "qwen2.5vl:7b")` at runtime (advanced_vision toolset)
-3. `~/.dobby/models.json`, e.g. `{"vision": "qwen2.5vl:7b", "visual_pick": "qwen3-vl:8b"}` (re-read on change)
-4. `CONFIG.model_<role>`, else the `gemma3_*` defaults
-
-Compare candidates first: `python scripts/bench_models.py --models gemma3:4b,qwen2.5vl:7b`.
-It scores accuracy, confident mistakes and whether a model says "none" when the target is
-absent. `get_model_roles` lists roles, sources and known candidates (`dobby/local_models.py`).
-Nothing downloads models; pull them yourself after checking `~/LocalAI/MODELS.md`.
-
-## ADK pipeline (optional)
-
-`pip install -e '.[adk]'`, then `python -m dobby.adk plan.json` runs a JSON plan step by step: code calls the tools, local Gemma judges each step through ADK structured-output agents (OCR first, then a text verifier, then `ask_screen`), and the run stops with a report when a step cannot be verified. Format and tiers: `plugins/dobby/skills/orchestrator/references/adk-pipeline.md`; example: `examples/adk/example_click_plan.json`.
-
-## Agent skills plugin
-
-`plugins/dobby/` is a Claude Code plugin of skills that teach an agent
-to use this server well: a perception ladder that avoids screenshots, verified
-actions, app playbooks (Claude, Chrome, Vivado, Verdi), skill crafting,
-evaluation and troubleshooting. Install it with
-`/plugin marketplace add <path to this repo>` and
-`/plugin install dobby@dobby`. See
-[plugins/dobby/README.md](plugins/dobby/README.md).
+Apache 2.0. See [LICENSE](LICENSE).

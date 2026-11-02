@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "Dobby"
 version = "0.1.0"
-description = "Model Context Protocol (MCP) server for desktop GUI automation, screen perception, and window management on Linux and Windows"
+description = "Model Context Protocol (MCP) server for desktop GUI automation, screen perception, and window management on macOS and Linux"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

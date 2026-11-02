@@ -88,8 +88,9 @@ def main() -> int:
     c._place_glow(rect, 0)
     for i, (px, py) in enumerate([(0.3, 0.4), (0.5, 0.55), (0.62, 0.7)]):
         pt = (rect[0] + rect[2] * px, rect[1] + rect[3] * py)
-        c.handle({"op": "cursor.move", "x": pt[0], "y": pt[1], "ms": 0, "verb": "Click"})
-        c.handle({"op": "intent", "text": f"Click ‘Send’" if i == 2 else f"Click ‘Item {i + 1}’"})
+        # Like OverlayHAL inside step(): the intent names the step, the move has no verb.
+        c.handle({"op": "cursor.move", "x": pt[0], "y": pt[1], "ms": 0})
+        c.handle({"op": "intent", "text": "Click ‘Send’" if i == 2 else f"Click ‘Item {i + 1}’"})
         if i < 2:
             c.handle({"op": "cursor.click", "count": 1})
     shot("3-working")

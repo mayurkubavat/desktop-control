@@ -635,3 +635,22 @@ def test_modern_trail_keeps_three_dots(make):
     for _ in range(5):
         c.handle({"op": "cursor.click", "count": 1})
     assert len(c.panels[0].trail.sublayers() or []) == 3
+
+
+def test_modern_paused_turns_pointer_and_tag_amber(make):
+    import Quartz
+    from dobby.overlay import mac_helper
+
+    c, _ = _modern(make)
+    c._mark_active()
+    c._refresh_pill()
+    c.set_paused(True)
+    assert Quartz.CGColorEqualToColor(c.panels[0].arrow.fillColor(), mac_helper._cg(c.colors["caution"]))
+
+
+def test_modern_one_step_per_action(make):
+    c, _ = _modern(make)
+    c.handle({"op": "intent", "text": "Click ‘Send’"})
+    c.handle({"op": "cursor.move", "x": 300.0, "y": 300.0, "ms": 0})
+    assert c.task_steps == 1
+    assert "step 1" in c.pill.label.stringValue()

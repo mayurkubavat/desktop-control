@@ -1041,7 +1041,8 @@ class _Pill:
                 self._dress(btn, b)
             if btn.layer() is not None and self.modern:
                 btn.layer().setBackgroundColor_(None)
-        x = 14.0
+        # The compact capsule's round ends make the dot side look wider.
+        x = 12.0 if spec.compact else 14.0
         dots = list(dots) if self.modern else []
         if dots:
             img = _dots_image(dots)
@@ -1070,7 +1071,7 @@ class _Pill:
             f = btn.frame()
             btn.setFrameOrigin_((x, (H - f.size.height) / 2))
             x += f.size.width + (gaps[min(i, len(gaps) - 1)] if i < len(visible) - 1 else 0.0)
-        w = x + (12.0 if visible else 14.0)
+        w = x + (12.0 if visible else (15.0 if spec.compact else 14.0))
         screens = NSScreen.screens() or []
         if screens:
             vf = screens[0].visibleFrame()
@@ -1527,8 +1528,15 @@ class OverlayController:
             return
         self._glow_sig = sig
         opacity = style.glow_opacity(state, self.glow_dim) if shown else 0.0
+        # Paused / your turn turns pointer and tag amber with the glow.
+        pointer_rgb = self.colors["caution"] if state == "halted" else self.rgb
+        CATransaction.begin()
+        CATransaction.setAnimationDuration_(0.25)
         for p in self.panels:
             p.set_glow_color(rgb)
+            p.arrow.setFillColor_(_cg(pointer_rgb))
+            p.tag.apply_color(pointer_rgb)
+        CATransaction.commit()
         self._set_glow_opacity(opacity)
         sweep = state == "thinking" and opacity > 0 and not self.reduce_motion
         pulse = state == "risk" and opacity > 0 and not self.reduce_motion

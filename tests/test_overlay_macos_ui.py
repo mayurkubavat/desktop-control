@@ -654,3 +654,8 @@ def test_modern_one_step_per_action(make):
     c.handle({"op": "cursor.move", "x": 300.0, "y": 300.0, "ms": 0})
     assert c.task_steps == 1
     assert "step 1" in c.pill.label.stringValue()
+
+
+def test_modern_dot_sits_above_glass(make):
+    c, _ = _modern(make)
+    assert c.pill.dot.superlayer() is c.pill.tint.layer()

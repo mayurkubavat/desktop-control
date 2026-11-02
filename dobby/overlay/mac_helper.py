@@ -976,7 +976,8 @@ class _Pill:
             self.menu_btn.setImagePosition_(NSImageOnly)
         self._symbols: Dict[Tuple[str, str], Any] = {}
         self.dot = CALayer.layer()
-        layer.addSublayer_(self.dot)
+        # Modern: above the glass and tint subviews, which would cover it on the view layer.
+        (self.tint or view).layer().addSublayer_(self.dot)
         _track_hover(view)
         self.shimmer = None
         self.window, self.view = win, view
